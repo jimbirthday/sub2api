@@ -45,7 +45,7 @@
 
       <!-- Group quota info (compact) -->
       <div class="mb-3 grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg bg-gray-50 px-3 py-2 text-xs dark:bg-dark-700/50">
-        <div class="flex items-center justify-between">
+        <div v-if="!plan.shared" class="flex items-center justify-between">
           <span class="text-gray-400 dark:text-dark-500">{{ t('payment.planCard.rate') }}</span>
           <span class="font-medium text-gray-700 dark:text-gray-300">{{ rateDisplay }}</span>
         </div>
@@ -80,6 +80,7 @@
         </div>
       </div>
 
+      <p v-if="plan.shared" class="mb-3 text-xs text-gray-500 dark:text-dark-400">{{ Object.values(plan.group_names || {}).join(' · ') }}<br />{{ t('sharedSubscriptions.billingHint') }}</p>
       <!-- Features list (compact) -->
       <div v-if="plan.features.length > 0" class="mb-3 space-y-1">
         <div v-for="feature in plan.features" :key="feature" class="flex items-start gap-1.5">
@@ -141,7 +142,7 @@ const textClass = computed(() => platformTextClass(platform.value))
 const iconClass = computed(() => platformIconClass(platform.value))
 const btnClass = computed(() => platformButtonClass(platform.value))
 const discountClass = computed(() => platformDiscountClass(platform.value))
-const pLabel = computed(() => platformLabel(platform.value))
+const pLabel = computed(() => props.plan.shared ? t('sharedSubscriptions.title') : platformLabel(platform.value))
 
 const discountText = computed(() => {
   if (!props.plan.original_price || props.plan.original_price <= 0) return ''

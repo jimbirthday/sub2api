@@ -273,12 +273,17 @@ func (s *BatchImageSettlementService) recordUsageLog(ctx context.Context, job *B
 		ActualCost:            actualCost,
 		RateMultiplier:        job.GroupRateMultiplier * job.BatchDiscountMultiplier,
 		AccountRateMultiplier: &accountRateMultiplier,
-		BillingType:           BillingTypeBalance,
-		RequestType:           RequestTypeSync,
-		BillingMode:           &billingMode,
-		ImageSize:             &imageSize,
-		SessionID:             job.SessionID,
-		CreatedAt:             createdAt,
+		BillingType: func() int8 {
+			if job.SharedFunding != nil {
+				return BillingTypeSharedSubscription
+			}
+			return BillingTypeBalance
+		}(),
+		RequestType: RequestTypeSync,
+		BillingMode: &billingMode,
+		ImageSize:   &imageSize,
+		SessionID:   job.SessionID,
+		CreatedAt:   createdAt,
 	}
 	writeUsageLogBestEffort(ctx, s.UsageLogRepo, usageLog, "service.batch_image_settlement")
 }

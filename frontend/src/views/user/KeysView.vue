@@ -165,6 +165,7 @@
                 <GroupBadge
                   v-if="row.group"
                   :name="row.group.name"
+                  :subscription-available="groups.some(group => group.id === row.group.id && group.shared_subscription_covered)"
                   :platform="row.group.platform"
                   :subscription-type="row.group.subscription_type"
                   :rate-multiplier="row.group.rate_multiplier"
@@ -551,6 +552,7 @@
               <GroupBadge
                 v-if="option"
                 :name="(option as unknown as GroupOption).label"
+                :subscription-available="(option as unknown as GroupOption).subscriptionAvailable"
                 :platform="(option as unknown as GroupOption).platform"
                 :subscription-type="(option as unknown as GroupOption).subscriptionType"
                 :rate-multiplier="(option as unknown as GroupOption).rate"
@@ -565,6 +567,7 @@
             <template #option="{ option, selected }">
               <GroupOptionItem
                 :name="(option as unknown as GroupOption).label"
+                :subscription-available="(option as unknown as GroupOption).subscriptionAvailable"
                 :platform="(option as unknown as GroupOption).platform"
                 :subscription-type="(option as unknown as GroupOption).subscriptionType"
                 :rate-multiplier="(option as unknown as GroupOption).rate"
@@ -1172,6 +1175,7 @@
           >
             <GroupOptionItem
               :name="option.label"
+              :subscription-available="option.subscriptionAvailable"
               :platform="option.platform"
               :subscription-type="option.subscriptionType"
               :rate-multiplier="option.rate"
@@ -1244,6 +1248,7 @@ const formatDateTimeLocal = (isoDate: string): string => {
 
 interface GroupOption {
   value: number
+  subscriptionAvailable?: boolean
   label: string
   description: string | null
   rate: number
@@ -1513,6 +1518,7 @@ const groupOptions = computed(() =>
   groups.value.map((group) => ({
     value: group.id,
     label: group.name,
+    subscriptionAvailable: !!group.shared_subscription_covered,
     description: group.description,
     rate: group.rate_multiplier,
     userRate: userGroupRates.value[group.id] ?? null,

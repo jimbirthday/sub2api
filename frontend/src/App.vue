@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { SHARED_SUBSCRIPTIONS_REFRESH_EVENT } from '@/utils/sharedSubscriptions'
 import Toast from '@/components/common/Toast.vue'
 import NavigationProgress from '@/components/common/NavigationProgress.vue'
 import AdminComplianceDialog from '@/components/admin/AdminComplianceDialog.vue'
 import { resolveRouteDocumentTitle } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
-import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminComplianceStore, useAdminSettingsStore } from '@/stores'
+import { useAppStore, useAuthStore, useSubscriptionStore, useSharedSubscriptionStore, useAnnouncementStore, useAdminComplianceStore, useAdminSettingsStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
 import { updateFavicon } from '@/utils/branding'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
@@ -17,6 +18,7 @@ const route = useRoute()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const subscriptionStore = useSubscriptionStore()
+const sharedSubscriptionStore = useSharedSubscriptionStore()
 const announcementStore = useAnnouncementStore()
 const adminComplianceStore = useAdminComplianceStore()
 const adminSettingsStore = useAdminSettingsStore()
@@ -62,6 +64,16 @@ watch(
 function onVisibilityChange() {
   if (document.visibilityState === 'visible' && authStore.isAuthenticated) {
     announcementStore.fetchAnnouncements()
+    if (subscriptionFeatureEnabled.value) {
+      sharedSubscriptionStore.updateClock()
+      void sharedSubscriptionStore.fetch(true).catch(() => {})
+    }
+  }
+}
+
+function onSharedSubscriptionsRefresh() {
+  if (authStore.isAuthenticated && subscriptionFeatureEnabled.value) {
+    sharedSubscriptionStore.fetch(true).catch((error) => console.error('Failed to refresh shared subscriptions:', error))
   }
 }
 
@@ -78,6 +90,10 @@ function startSubscriptionSync() {
     console.error('Failed to preload subscriptions:', error)
   })
   subscriptionStore.startPolling()
+  sharedSubscriptionStore.fetch().catch((error) => {
+    console.error('Failed to preload shared subscriptions:', error)
+  })
+  sharedSubscriptionStore.startPolling()
 }
 
 watch(subscriptionFeatureEnabled, (enabled) => {
@@ -86,6 +102,7 @@ watch(subscriptionFeatureEnabled, (enabled) => {
     startSubscriptionSync()
   } else {
     subscriptionStore.clear()
+    sharedSubscriptionStore.clear()
   }
 })
 
@@ -119,6 +136,7 @@ watch(
     } else {
       // User logged out: clear data and stop polling
       subscriptionStore.clear()
+      sharedSubscriptionStore.clear()
       announcementStore.reset()
       adminComplianceStore.reset()
       document.removeEventListener('visibilitychange', onVisibilityChange)
@@ -131,16 +149,20 @@ watch(
 router.afterEach(() => {
   if (authStore.isAuthenticated) {
     announcementStore.fetchAnnouncements()
+    if (subscriptionFeatureEnabled.value) void sharedSubscriptionStore.fetch().catch(() => {})
   }
 })
 
 onBeforeUnmount(() => {
+  sharedSubscriptionStore.stopPolling()
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('admin-compliance-required', onAdminComplianceRequired)
+  window.removeEventListener(SHARED_SUBSCRIPTIONS_REFRESH_EVENT, onSharedSubscriptionsRefresh)
 })
 
 onMounted(async () => {
   window.addEventListener('admin-compliance-required', onAdminComplianceRequired)
+  window.addEventListener(SHARED_SUBSCRIPTIONS_REFRESH_EVENT, onSharedSubscriptionsRefresh)
 
   // Check if setup is needed
   try {

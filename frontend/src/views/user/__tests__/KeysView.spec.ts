@@ -570,6 +570,14 @@ describe('user KeysView column settings', () => {
       getAvailableGroups.mockResolvedValue(availableGroups)
     })
 
+    it('keeps original group names and marks shared coverage separately', async () => {
+      getAvailableGroups.mockResolvedValue([{ ...availableGroups[0], shared_subscription_covered: true }, availableGroups[1]])
+      const wrapper = await openCreate()
+      expect(groupSelect(wrapper).props('options')[0]).toMatchObject({ label: availableGroups[0].name, subscriptionAvailable: true })
+      await chooseProvider(wrapper, 'openai')
+      expect(groupSelect(wrapper).props('options')[0]).toMatchObject({ label: availableGroups[1].name, subscriptionAvailable: false })
+    })
+
     it('classifies all configured platforms and retains the complete table filter', async () => {
       const wrapper = await openCreate()
       expect(wrapper.findAll('input[name="key-provider"]')).toHaveLength(4)

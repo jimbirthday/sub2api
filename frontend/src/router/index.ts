@@ -289,6 +289,36 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/shared-subscriptions',
+    name: 'SharedSubscriptions',
+	    redirect: '/subscriptions',
+	    meta: { requiresAuth: true, titleKey: 'userSubscriptions.title' }
+  },
+  {
+    path: '/admin/shared-subscriptions',
+    name: 'AdminSharedSubscriptions',
+    redirect: '/admin/shared-subscriptions/plans',
+    meta: { requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    path: '/admin/shared-subscriptions/plans',
+    name: 'AdminSharedSubscriptionPlans',
+    component: () => import('@/views/user/SharedSubscriptionsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'sharedSubscriptions.planManagement' }
+  },
+  {
+    path: '/admin/shared-subscriptions/subscriptions',
+    name: 'AdminSharedSubscriptionUsers',
+    component: () => import('@/views/admin/SharedSubscriptionsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'sharedSubscriptions.subscriptionManagement' }
+  },
+  {
+    path: '/admin/shared-subscriptions/calculator',
+    name: 'AdminSharedSubscriptionCalculator',
+    component: () => import('@/views/admin/SharedSubscriptionCalculatorView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, titleKey: 'sharedSubscriptions.calculator' }
+  },
+  {
     path: '/subscriptions',
     name: 'Subscriptions',
     component: () => import('@/views/user/SubscriptionsView.vue'),
@@ -732,10 +762,13 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes,
-  scrollBehavior(_to, _from, savedPosition) {
+  scrollBehavior(to, _from, savedPosition) {
     // Scroll to saved position when using browser back/forward
     if (savedPosition) {
       return savedPosition
+    }
+    if (to.hash) {
+      return { el: to.hash, top: 80, behavior: 'smooth' }
     }
     // Scroll to top for new routes
     return { top: 0 }

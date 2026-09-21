@@ -8,6 +8,7 @@
       <!-- Row 1: platform badge (name bold) -->
       <GroupBadge
         :name="name"
+        :subscription-available="subscriptionAvailable"
         :platform="platform"
         :subscription-type="subscriptionType"
         :show-rate="false"
@@ -70,6 +71,7 @@ const { t } = useI18n()
 
 interface Props {
   name: string
+  subscriptionAvailable?: boolean
   platform: GroupPlatform
   subscriptionType?: SubscriptionType
   rateMultiplier?: number

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
 	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -32,6 +33,15 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 		return nil, service.ErrUsageBillingRequestIDRequired
 	}
 
+	if cmd.SharedFunding != nil {
+		if cmd.SharedFunding.UserID != cmd.UserID || cmd.SubscriptionID != nil || cmd.SubscriptionCost != 0 || cmd.BalanceCost != 0 || cmd.SharedCost < 0 || math.IsNaN(cmd.SharedCost) || math.IsInf(cmd.SharedCost, 0) {
+			return nil, errors.New("invalid shared billing command")
+		}
+		if err := r.persistSharedJob(ctx, cmd); err != nil {
+			return nil, err
+		}
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -47,6 +57,15 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 		return nil, err
 	}
 	if !applied {
+		if cmd.SharedFunding != nil {
+			if _, err = tx.ExecContext(ctx, "UPDATE shared_subscription_billing_jobs SET completed_at=NOW(),last_error='' WHERE request_id=$1 AND api_key_id=$2", cmd.RequestID, cmd.APIKeyID); err != nil {
+				return nil, err
+			}
+			if err = tx.Commit(); err != nil {
+				return nil, err
+			}
+			tx = nil
+		}
 		return &service.UsageBillingApplyResult{Applied: false}, nil
 	}
 
@@ -55,6 +74,11 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 		return nil, err
 	}
 
+	if cmd.SharedFunding != nil {
+		if _, err = tx.ExecContext(ctx, "UPDATE shared_subscription_billing_jobs SET completed_at=NOW(),last_error='' WHERE request_id=$1 AND api_key_id=$2", cmd.RequestID, cmd.APIKeyID); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -110,14 +134,23 @@ func (r *usageBillingRepository) claimUsageBillingRequest(ctx context.Context, t
 }
 
 func (r *usageBillingRepository) ReserveBatchImageBalance(ctx context.Context, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
+	if cmd != nil && cmd.SharedFunding != nil {
+		return r.applyBatchImageBalanceHold(ctx, cmd, reserveSharedHold)
+	}
 	return r.applyBatchImageBalanceHold(ctx, cmd, reserveUsageBillingBatchImageBalance)
 }
 
 func (r *usageBillingRepository) CaptureBatchImageBalance(ctx context.Context, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
+	if cmd != nil && cmd.SharedFunding != nil {
+		return r.applyBatchImageBalanceHold(ctx, cmd, captureSharedHold)
+	}
 	return r.applyBatchImageBalanceHold(ctx, cmd, captureUsageBillingBatchImageBalance)
 }
 
 func (r *usageBillingRepository) ReleaseBatchImageBalance(ctx context.Context, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
+	if cmd != nil && cmd.SharedFunding != nil {
+		return r.applyBatchImageBalanceHold(ctx, cmd, releaseSharedHold)
+	}
 	return r.applyBatchImageBalanceHold(ctx, cmd, releaseUsageBillingBatchImageBalance)
 }
 
@@ -172,14 +205,28 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 }
 
 func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult) error {
+	balanceCost := cmd.BalanceCost
+	if cmd.SharedFunding != nil {
+		allocations, wallet, err := allocateSharedFunding(ctx, tx, cmd.SharedFunding, cmd.SharedCost, false)
+		if err != nil {
+			return err
+		}
+		if err = recordSharedSettlement(ctx, tx, cmd.RequestID, cmd.APIKeyID, cmd.SharedFunding, cmd.SharedCost, wallet, allocations); err != nil {
+			return err
+		}
+		result.SharedConsumed = service.QuantizeUsageBillingAmount(cmd.SharedCost - wallet)
+		balanceCost = wallet
+	}
+	result.WalletConsumed = balanceCost
+
 	if cmd.SubscriptionCost > 0 && cmd.SubscriptionID != nil {
 		if err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.SubscriptionCost); err != nil {
 			return err
 		}
 	}
 
-	if cmd.BalanceCost > 0 {
-		newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.BalanceCost)
+	if balanceCost > 0 {
+		newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, balanceCost)
 		if err != nil {
 			return err
 		}

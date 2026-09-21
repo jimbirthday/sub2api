@@ -124,7 +124,14 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 			return
 		}
 		// 专属分组授权校验：用户对该专属分组的授权被撤销后应拒绝（与主中间件一致，防止越权）。
-		if !validateAPIKeyGroupAllowed(apiKey) {
+		if cfg.RunMode != config.RunModeSimple {
+			apiKey, err = apiKeyService.WithSharedFunding(c.Request.Context(), apiKey)
+			if err != nil {
+				abortWithGoogleError(c, 503, "Failed to load subscription wallet")
+				return
+			}
+		}
+		if apiKey.SharedFunding == nil && !validateAPIKeyGroupAllowed(apiKey) {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable)
 			MarkIngressRejected(c, IngressRejectGroupNotAllowed)
 			abortWithGoogleError(c, 403, "API Key 所属专属分组不再允许当前用户使用")
@@ -166,7 +173,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 		}
 
 		isSubscriptionType := apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
-		if isSubscriptionType && subscriptionService != nil {
+		if apiKey.SharedFunding == nil && isSubscriptionType && subscriptionService != nil {
 			subscription, err := subscriptionService.GetActiveSubscription(
 				c.Request.Context(),
 				apiKey.User.ID,
@@ -200,7 +207,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 
 			c.Set(string(ContextKeySubscription), subscription)
 		} else {
-			if apiKeyBalanceBelowAuthThreshold(apiKey.User.Balance, cfg) {
+			if (apiKey.SharedFunding == nil || !apiKey.SharedFunding.Available) && apiKeyBalanceBelowAuthThreshold(apiKey.User.Balance, cfg) {
 				abortWithGoogleError(c, 403, "Insufficient account balance")
 				return
 			}

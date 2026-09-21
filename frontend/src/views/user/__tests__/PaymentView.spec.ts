@@ -24,6 +24,11 @@ const showError = vi.hoisted(() => vi.fn())
 const showInfo = vi.hoisted(() => vi.fn())
 const showWarning = vi.hoisted(() => vi.fn())
 const getCheckoutInfo = vi.hoisted(() => vi.fn())
+const sharedPlans = vi.hoisted(() => vi.fn().mockResolvedValue([]))
+vi.mock('@/api/sharedSubscriptions', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/api/sharedSubscriptions')>(),
+  sharedSubscriptionsAPI: { plans: sharedPlans },
+}))
 const bridgeInvoke = vi.hoisted(() => vi.fn())
 const translate = vi.hoisted(() => vi.fn((key: string) => key))
 // Public settings live in a reactive holder so tests can flip feature flags after mount
@@ -356,6 +361,37 @@ describe('PaymentView help text', () => {
     const wrapper = await mountHelp('', 'https://example.com/help.png')
     expect(wrapper.find('.markdown-body').exists()).toBe(false)
     expect(wrapper.get('img').attributes('src')).toBe('https://example.com/help.png')
+  })
+})
+
+describe('PaymentView shared catalog', () => {
+  const plan = { id: 1, version: 1, name: 'Shared catalog plan', description: '', price: 8, validity_days: 30, group_ids: [3, 4], daily_limit_usd: 5, weekly_limit_usd: null, monthly_limit_usd: null, for_sale: true }
+  afterEach(() => { sharedPlans.mockReset().mockResolvedValue([]) })
+  it('loads shared plans without a deep link alongside a legacy plan with the same ID', async () => {
+    sharedPlans.mockResolvedValue([plan])
+    const wrapper = await mountSubscriptionPlanList(1)
+    const cards = wrapper.findAllComponents(SubscriptionPlanCard)
+    expect(cards).toHaveLength(2)
+    expect(cards[0].props('plan')).toMatchObject({ id: 1, name: 'Plan 1' })
+    expect(cards[1].props('plan')).toMatchObject({ id: 1, shared: true, name: plan.name })
+    cards[1].vm.$emit('select', cards[1].props('plan'))
+    await flushPromises()
+    expect(wrapper.text()).toContain(plan.name)
+    expect(wrapper.text()).toContain('sharedSubscriptions.stackingHint')
+    wrapper.unmount()
+  })
+  it('keeps legacy checkout usable when the shared catalog request fails', async () => {
+    sharedPlans.mockRejectedValue(new Error('Shared catalog unavailable'))
+    const wrapper = await mountSubscriptionPlanList(1)
+    expect(wrapper.findAllComponents(SubscriptionPlanCard)).toHaveLength(1)
+    expect(showError).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it('shows shared plans even when no legacy plans are for sale', async () => {
+    sharedPlans.mockResolvedValue([plan])
+    const wrapper = await mountSubscriptionPlanList(0)
+    expect(wrapper.findAllComponents(SubscriptionPlanCard)).toHaveLength(1)
+    wrapper.unmount()
   })
 })
 

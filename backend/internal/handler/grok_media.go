@@ -478,6 +478,13 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			// model/duration/resolution so status can still price if upstream omits them.
 			// Retry once: missing pending causes silent underpricing (status omits resolution).
 			pending := service.GrokVideoPendingBilling{
+				SharedFunding: apiKey.SharedFunding,
+				BillingGroup: func() *service.Group {
+					if apiKey.SharedFunding != nil {
+						return apiKey.Group
+					}
+					return nil
+				}(),
 				Model:                requestModel,
 				BillingModel:         firstNonEmptyString(result.BillingModel, requestModel),
 				UpstreamModel:        result.UpstreamModel,
@@ -646,6 +653,8 @@ func prepareGrokVideoCompletionBilling(
 	// Re-merge with pending: resolution is request-only; model/duration fill gaps.
 	merged := *statusResult
 	if pending != nil {
+		merged.SharedFunding = pending.SharedFunding
+		merged.SharedBillingGroup = pending.BillingGroup
 		if strings.TrimSpace(merged.Model) == "" {
 			merged.Model = firstNonEmptyString(pending.BillingModel, pending.Model, pending.OriginalModel)
 		}
@@ -716,6 +725,14 @@ func recordGrokMediaUsage(
 	body []byte,
 	requestID string,
 ) {
+	if result != nil && result.SharedFunding != nil && result.SharedBillingGroup != nil {
+		cp := *apiKey
+		cp.SharedFunding = result.SharedFunding
+		cp.Group = result.SharedBillingGroup
+		cp.GroupID = &result.SharedFunding.GroupID
+		apiKey = &cp
+		subscription = nil
+	}
 	userAgent := c.GetHeader("User-Agent")
 	clientIP := ip.GetClientIP(c)
 	sessionID := service.ExtractClientSessionID(c)

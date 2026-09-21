@@ -160,7 +160,14 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		if abortIfAPIKeyGroupUnavailable(c, apiKey) {
 			return
 		}
-		if abortIfAPIKeyGroupNotAllowed(c, apiKey) {
+		if cfg.RunMode != config.RunModeSimple {
+			apiKey, err = apiKeyService.WithSharedFunding(c.Request.Context(), apiKey)
+			if err != nil {
+				AbortWithError(c, 503, "SHARED_SUBSCRIPTION_UNAVAILABLE", "Failed to load subscription wallet")
+				return
+			}
+		}
+		if apiKey.SharedFunding == nil && abortIfAPIKeyGroupNotAllowed(c, apiKey) {
 			return
 		}
 		ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
@@ -194,7 +201,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		isSubscriptionType := apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 
 		// 倍率自省不需要订阅数据；/v1/usage 仍保留原有订阅读取行为。
-		if isSubscriptionType && subscriptionService != nil && !billingInfoRequest {
+		if apiKey.SharedFunding == nil && isSubscriptionType && subscriptionService != nil && !billingInfoRequest {
 			sub, subErr := subscriptionService.GetActiveSubscription(
 				c.Request.Context(),
 				apiKey.User.ID,
@@ -260,7 +267,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				}
 			} else {
 				// 非订阅模式 或 订阅模式但 subscriptionService 未注入：回退到余额检查
-				if apiKeyBalanceBelowAuthThreshold(apiKey.User.Balance, cfg) {
+				if (apiKey.SharedFunding == nil || !apiKey.SharedFunding.Available) && apiKeyBalanceBelowAuthThreshold(apiKey.User.Balance, cfg) {
 					AbortWithError(c, 403, "INSUFFICIENT_BALANCE", "Insufficient account balance")
 					return
 				}

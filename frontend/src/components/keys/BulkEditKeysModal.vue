@@ -30,7 +30,10 @@
             :aria-label="t('keys.groupLabel')"
             searchable
             data-test="group-input"
-          />
+          >
+            <template #selected="{ option }"><GroupBadge v-if="option" :name="String(option.label)" :subscription-available="!!option.subscriptionAvailable" :show-rate="false" /><span v-else>{{ t('keys.selectGroup') }}</span></template>
+            <template #option="{ option }"><GroupBadge :name="String(option.label)" :subscription-available="!!option.subscriptionAvailable" :show-rate="false" /></template>
+          </Select>
         </div>
 
         <div class="space-y-2">
@@ -155,6 +158,7 @@ import { keysAPI } from '@/api'
 import { useAppStore } from '@/stores/app'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
+import GroupBadge from '@/components/common/GroupBadge.vue'
 import type { ApiKey, Group, UpdateApiKeyRequest } from '@/types'
 
 type SelectedKey = Pick<ApiKey, 'id' | 'name'>
@@ -206,7 +210,7 @@ const ipFields: Array<{ key: IPField; label: string }> = [
   { key: 'ip_whitelist', label: 'keys.ipWhitelist' },
   { key: 'ip_blacklist', label: 'keys.ipBlacklist' }
 ]
-const groupOptions = computed(() => props.groups.map((group) => ({ value: group.id, label: group.name })))
+const groupOptions = computed(() => props.groups.map((group) => ({ value: group.id, label: group.name, subscriptionAvailable: !!group.shared_subscription_covered })))
 const statusOptions = computed(() => [
   { value: 'active', label: t('keys.enable') },
   { value: 'inactive', label: t('keys.disable') }

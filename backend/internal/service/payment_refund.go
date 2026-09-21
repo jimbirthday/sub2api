@@ -245,6 +245,9 @@ func (s *PaymentService) PrepareRefund(ctx context.Context, oid int64, amt float
 	if rr == "" {
 		rr = fmt.Sprintf("refund order:%d", o.ID)
 	}
+	if o.OrderType == SharedSubscriptionOrderType && amt != o.Amount {
+		return nil, nil, infraerrors.BadRequest("SHARED_REFUND_FULL_ONLY", "shared subscription orders require a full refund")
+	}
 	p := &RefundPlan{OrderID: oid, Order: o, RefundAmount: amt, GatewayAmount: ga, Reason: rr, Force: force, DeductBalance: deduct, DeductionType: payment.DeductionTypeNone}
 	if deduct {
 		if er := s.prepDeduct(ctx, o, p, force); er != nil {
@@ -255,6 +258,10 @@ func (s *PaymentService) PrepareRefund(ctx context.Context, oid int64, amt float
 }
 
 func (s *PaymentService) prepDeduct(ctx context.Context, o *dbent.PaymentOrder, p *RefundPlan, force bool) *RefundResult {
+	if o.OrderType == SharedSubscriptionOrderType {
+		p.DeductionType = SharedSubscriptionOrderType
+		return nil
+	}
 	if o.OrderType == payment.OrderTypeSubscription {
 		p.DeductionType = payment.DeductionTypeSubscription
 		if o.SubscriptionGroupID != nil && o.SubscriptionDays != nil {
@@ -338,6 +345,16 @@ func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*Ref
 		} else {
 			slog.Warn("skipping subscription deduction on retry (previous rollback failed)", "orderID", p.OrderID)
 			p.SubDaysToDeduct = 0
+		}
+	}
+	if p.DeductionType == SharedSubscriptionOrderType {
+		if s.sharedSubscriptions == nil {
+			s.restoreStatus(ctx, p)
+			return nil, fmt.Errorf("shared subscriptions unavailable")
+		}
+		if err := s.sharedSubscriptions.repo.RefundOrder(ctx, p.OrderID, true); err != nil {
+			s.restoreStatus(ctx, p)
+			return nil, err
 		}
 	}
 	resp, err := s.gwRefund(ctx, p)
@@ -456,7 +473,7 @@ func (s *PaymentService) QueryAndFinalizeRefund(ctx context.Context, oid int64) 
 	if !pendingDetail.DeductionRollbackOK {
 		plan.BalanceToDeduct = 0
 		plan.SubDaysToDeduct = 0
-	} else if o.OrderType == payment.OrderTypeSubscription {
+	} else if o.OrderType == payment.OrderTypeSubscription || o.OrderType == SharedSubscriptionOrderType {
 		if early := s.prepDeduct(ctx, o, plan, true); early != nil {
 			return early, nil
 		}
@@ -533,6 +550,9 @@ func (s *PaymentService) refundFinalizePlan(o *dbent.PaymentOrder) *RefundPlan {
 }
 
 func (s *PaymentService) applyRefundFinalDeduction(ctx context.Context, p *RefundPlan) error {
+	if p.Order.OrderType == SharedSubscriptionOrderType && p.DeductBalance {
+		return s.sharedSubscriptions.repo.RefundOrder(ctx, p.OrderID, true)
+	}
 	if p.DeductionType == payment.DeductionTypeBalance && p.BalanceToDeduct > 0 {
 		deducted, err := s.deductAvailableBalance(ctx, p.Order.UserID, p.BalanceToDeduct)
 		if err != nil {
@@ -694,6 +714,9 @@ func refundResponseID(resp *payment.RefundResponse) string {
 }
 
 func (s *PaymentService) RollbackRefund(ctx context.Context, p *RefundPlan, gErr error) bool {
+	if p.DeductionType == SharedSubscriptionOrderType {
+		return s.sharedSubscriptions.repo.RefundOrder(ctx, p.OrderID, false) == nil
+	}
 	if p.DeductionType == payment.DeductionTypeBalance && p.BalanceToDeduct > 0 {
 		if err := s.userRepo.UpdateBalance(ctx, p.Order.UserID, p.BalanceToDeduct); err != nil {
 			slog.Error("[CRITICAL] rollback failed", "orderID", p.OrderID, "amount", p.BalanceToDeduct, "error", err)

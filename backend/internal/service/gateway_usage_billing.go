@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -287,6 +288,7 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		AccountType:        p.Account.Type,
 		RequestPayloadHash: strings.TrimSpace(p.RequestPayloadHash),
 	}
+	actualCost := p.Cost.ActualCost
 	if usageLog != nil {
 		cmd.Model = usageLog.Model
 		cmd.BillingType = usageLog.BillingType
@@ -304,30 +306,55 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		if usageLog.SubscriptionID != nil {
 			cmd.SubscriptionID = usageLog.SubscriptionID
 		}
+		if p.APIKey.SharedFunding != nil {
+			actualCost = usageLog.ActualCost
+			// Keep downstream cache, limit and notification updates on the same
+			// canonical amount as the shared settlement.
+			p.Cost.ActualCost = actualCost
+		}
 	}
 
 	// Record subscription / balance cost using ActualCost so the group (and any
 	// user-specific) rate multiplier consumes subscription quota at the expected
 	// speed. TotalCost remains the raw (pre-multiplier) value; downstream guards
 	// on "> 0" still correctly skip free subscriptions (RateMultiplier == 0).
-	if p.IsSubscriptionBill && p.Subscription != nil && p.Cost.TotalCost > 0 {
+	if p.APIKey.SharedFunding != nil {
+		cmd.SharedFunding = p.APIKey.SharedFunding
+		// The usage row is the user-visible bill and therefore the canonical
+		// amount for shared funding. Keeping a second, independently-read amount
+		// here can make shared windows consume a different value from the usage
+		// record when a caller has finalized/adjusted the row before billing.
+		// Production gateway paths always build the row before this command; the
+		// fallback is retained for internal callers that intentionally omit it.
+		cmd.SharedCost = actualCost
+		cmd.SharedPlatform = p.Platform
+		cmd.SubscriptionID = nil
+		cmd.BillingType = BillingTypeSharedSubscription
+	} else if p.IsSubscriptionBill && p.Subscription != nil && p.Cost.TotalCost > 0 {
 		cmd.SubscriptionID = &p.Subscription.ID
-		cmd.SubscriptionCost = p.Cost.ActualCost
-	} else if p.Cost.ActualCost > 0 {
-		cmd.BalanceCost = p.Cost.ActualCost
+		cmd.SubscriptionCost = actualCost
+	} else if actualCost > 0 {
+		cmd.BalanceCost = actualCost
 	}
 
 	if p.shouldDeductAPIKeyQuota() {
-		cmd.APIKeyQuotaCost = p.Cost.ActualCost
+		cmd.APIKeyQuotaCost = actualCost
 	}
 	if p.shouldUpdateRateLimits() {
-		cmd.APIKeyRateLimitCost = p.Cost.ActualCost
+		cmd.APIKeyRateLimitCost = actualCost
 	}
 	if p.shouldUpdateAccountQuota() {
 		cmd.AccountQuotaCost = p.Cost.TotalCost * p.AccountRateMultiplier
 	}
 
 	cmd.Normalize()
+	if usageLog != nil && cmd.SharedFunding != nil {
+		// Persist exactly the same NUMERIC(20,8) amount that is sent to the
+		// shared-settlement transaction. This removes even rounding-boundary
+		// drift between usage_logs.actual_cost and shared quota windows.
+		usageLog.ActualCost = cmd.SharedCost
+		p.Cost.ActualCost = cmd.SharedCost
+	}
 	return cmd
 }
 
@@ -338,6 +365,9 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
 	if cmd == nil || cmd.RequestID == "" || repo == nil {
+		if p.APIKey != nil && p.APIKey.SharedFunding != nil {
+			return false, fmt.Errorf("shared subscription billing requires transactional repository and request id")
+		}
 		postUsageBilling(ctx, p, deps)
 		return true, nil
 	}
@@ -370,7 +400,11 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 		return
 	}
 
-	if p.IsSubscriptionBill {
+	if p.APIKey != nil && p.APIKey.SharedFunding != nil {
+		if result != nil && result.WalletConsumed > 0 {
+			syncBalanceCacheAfterDeduction(ctx, p, deps, result)
+		}
+	} else if p.IsSubscriptionBill {
 		if p.Cost.ActualCost > 0 && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
 			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost)
 		}
@@ -439,7 +473,13 @@ func syncBalanceCacheAfterDeduction(ctx context.Context, p *postUsageBillingPara
 		}
 		return
 	}
-	deps.billingCacheService.QueueDeductBalance(p.User.ID, p.Cost.ActualCost)
+	amount := p.Cost.ActualCost
+	if p.APIKey != nil && p.APIKey.SharedFunding != nil && result != nil {
+		amount = result.WalletConsumed
+	}
+	if amount > 0 {
+		deps.billingCacheService.QueueDeductBalance(p.User.ID, amount)
+	}
 }
 
 // notifyBalanceLow sends balance low notification after deduction.
@@ -451,7 +491,11 @@ func notifyBalanceLow(p *postUsageBillingParams, deps *billingDeps, result *Usag
 			slog.Error("panic in notifyBalanceLow", "recover", r)
 		}
 	}()
-	if p.IsSubscriptionBill || p.Cost.ActualCost <= 0 || p.User == nil || deps.balanceNotifyService == nil {
+	amount := p.Cost.ActualCost
+	if p.APIKey != nil && p.APIKey.SharedFunding != nil && result != nil {
+		amount = result.WalletConsumed
+	}
+	if p.IsSubscriptionBill || amount <= 0 || p.User == nil || deps.balanceNotifyService == nil {
 		slog.Debug("notifyBalanceLow: skipped",
 			"is_subscription", p.IsSubscriptionBill,
 			"actual_cost", p.Cost.ActualCost,
@@ -470,13 +514,16 @@ func notifyBalanceLow(p *postUsageBillingParams, deps *billingDeps, result *Usag
 		"threshold", p.User.BalanceNotifyThreshold,
 		"result_has_new_balance", result != nil && result.NewBalance != nil,
 	)
-	deps.balanceNotifyService.CheckBalanceAfterDeduction(context.Background(), p.User, oldBalance, p.Cost.ActualCost)
+	deps.balanceNotifyService.CheckBalanceAfterDeduction(context.Background(), p.User, oldBalance, amount)
 }
 
 // resolveOldBalance returns the pre-deduction balance.
 // Prefers the DB transaction result (newBalance + cost) over snapshot.
 func resolveOldBalance(p *postUsageBillingParams, result *UsageBillingApplyResult) float64 {
 	if result != nil && result.NewBalance != nil {
+		if p.APIKey != nil && p.APIKey.SharedFunding != nil {
+			return *result.NewBalance + result.WalletConsumed
+		}
 		return *result.NewBalance + p.Cost.ActualCost
 	}
 	// Legacy fallback: snapshot balance from request context
@@ -719,6 +766,9 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
+	if apiKey.SharedFunding != nil {
+		subscription = nil
+	}
 	ApplyForwardImageBillingResolution(result)
 	logServiceTierBillingDowngrade("service.gateway", account, result.RequestID, ApplyForwardServiceTierBillingResolution(result))
 
@@ -807,8 +857,11 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}
 
 	// 判断计费方式：订阅模式 vs 余额模式
-	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+	isSubscriptionBilling := apiKey.SharedFunding == nil && subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 	billingType := BillingTypeBalance
+	if apiKey.SharedFunding != nil {
+		billingType = BillingTypeSharedSubscription
+	}
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription
 	}
@@ -867,7 +920,9 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}, s.billingDeps(), s.usageBillingRepo)
 
 	if billingErr != nil {
-		usageLog.ActualCost = 0
+		if apiKey.SharedFunding == nil {
+			usageLog.ActualCost = 0
+		}
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
 		return billingErr
 	}

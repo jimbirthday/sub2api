@@ -56,6 +56,9 @@
         <!-- Subscription Progress (for users with active subscriptions; not mounted at all when the feature is off) -->
         <SubscriptionProgressMini v-if="user && subscriptionFeatureEnabled" />
 
+        <!-- Shared subscription quota (compact header entry) -->
+        <SharedSubscriptionSummary v-if="user && subscriptionFeatureEnabled" />
+
         <!-- Balance Display -->
         <div
           v-if="user"
@@ -259,6 +262,7 @@ import { useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
+import SharedSubscriptionSummary from '@/components/common/SharedSubscriptionSummary.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'

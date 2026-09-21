@@ -728,7 +728,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
-    { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
+	    { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
     { path: '/purchase', label: purchaseNavLabel.value, icon: RechargeSubscriptionIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
@@ -791,6 +791,15 @@ const adminNavItems = computed((): NavItem[] => {
       ],
     },
     // 「仅充值」站点连管理端的「订阅管理」入口也一并收起（路由本身不拦截）。
+    {
+      path: '/admin/shared-subscriptions', label: t('sharedSubscriptions.title'), icon: CreditCardIcon,
+      hideInSimpleMode: true, featureFlag: flagSubscription, expandOnly: true,
+      children: [
+        { path: '/admin/shared-subscriptions/plans', label: t('sharedSubscriptions.planManagement'), icon: CreditCardIcon },
+        { path: '/admin/shared-subscriptions/subscriptions', label: t('sharedSubscriptions.subscriptionManagement'), icon: UsersIcon },
+        { path: '/admin/shared-subscriptions/calculator', label: t('sharedSubscriptions.calculator'), icon: ChartIcon },
+      ],
+    },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },

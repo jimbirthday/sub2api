@@ -561,6 +561,7 @@ export interface ReasoningEffortMapping {
 }
 
 export interface Group {
+  shared_subscription_covered?: boolean
   id: number
   name: string
   description: string | null

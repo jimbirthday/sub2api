@@ -53,6 +53,8 @@ func prepareSeedanceCompletionBilling(ctx context.Context, h *OpenAIGatewayHandl
 		return nil
 	}
 	merged := *result
+	merged.SharedFunding = pending.SharedFunding
+	merged.SharedBillingGroup = pending.BillingGroup
 	merged.Model = pending.Model
 	merged.BillingModel = firstNonEmptyString(pending.BillingModel, pending.Model)
 	merged.UpstreamModel = firstNonEmptyString(pending.UpstreamModel, result.UpstreamModel)

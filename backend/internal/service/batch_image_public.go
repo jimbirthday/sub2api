@@ -76,9 +76,10 @@ type BatchImageReferenceInput struct {
 }
 
 type BatchImageOwner struct {
-	UserID   int64
-	APIKeyID int64
-	GroupID  *int64
+	SharedFunding *SharedFunding
+	UserID        int64
+	APIKeyID      int64
+	GroupID       *int64
 }
 
 type BatchImagePublicService struct {
@@ -258,6 +259,7 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	holdID := BatchImageHoldRequestID(batchID)
 	holdAmount := pricingSnapshot.HoldAmount
 	job, err := s.Repo.CreateBatchImageJob(ctx, CreateBatchImageJobParams{
+		SharedFunding:           owner.SharedFunding,
 		BatchID:                 batchID,
 		UserID:                  owner.UserID,
 		APIKeyID:                &apiKeyID,

@@ -31,6 +31,19 @@ func RegisterAdminRoutes(
 	admin.Use(gin.HandlerFunc(auditLog))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
 	{
+		if h.SharedSubscription != nil {
+			shared := admin.Group("/shared-subscriptions")
+			shared.GET("/plans", h.SharedSubscription.AdminPlans)
+			shared.POST("/plans", h.SharedSubscription.SavePlan)
+			shared.PUT("/plans/:id", h.SharedSubscription.SavePlan)
+			shared.DELETE("/plans/:id", h.SharedSubscription.DeletePlan)
+			shared.GET("", h.SharedSubscription.AdminList)
+			shared.GET("/history", h.SharedSubscription.AdminHistory)
+			shared.POST("/assign", h.SharedSubscription.Assign)
+			shared.POST("/:id/action", h.SharedSubscription.Action)
+			shared.PUT("/:id/plan", h.SharedSubscription.ChangePlan)
+			shared.PUT("/:id/quota", h.SharedSubscription.UpdateQuota)
+		}
 		// 部署与运营合规确认
 		registerAdminComplianceRoutes(admin, h)
 

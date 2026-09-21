@@ -9,7 +9,7 @@
       </div>
 
       <!-- Empty State -->
-      <div v-else-if="subscriptions.length === 0" class="card p-12 text-center">
+      <div v-else-if="subscriptions.length === 0 && sharedSubscriptions.length === 0" class="card p-12 text-center">
         <div
           class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-dark-700"
         >
@@ -24,7 +24,7 @@
       </div>
 
       <!-- Subscriptions Grid -->
-      <div v-else class="grid gap-6 lg:grid-cols-2">
+      <div v-if="!loading && subscriptions.length" class="grid gap-6 lg:grid-cols-2">
         <div
           v-for="subscription in subscriptions"
           :key="subscription.id"
@@ -243,16 +243,77 @@
           </div>
         </div>
       </div>
+
+      <section id="shared-subscriptions" v-if="!loading && sharedSubscriptions.length" class="scroll-mt-20 space-y-3">
+        <p class="text-sm text-gray-500 dark:text-dark-400">{{ t('sharedSubscriptions.purchaseOrderHint') }}</p>
+        <div class="grid gap-6 lg:grid-cols-2">
+          <article v-for="sub in sharedSubscriptions" :key="`shared-${sub.id}`" class="overflow-hidden rounded-2xl border border-teal-200 bg-white dark:border-teal-900 dark:bg-dark-800">
+            <header class="flex items-start justify-between gap-3 border-b border-gray-100 p-4 dark:border-dark-700">
+              <div class="min-w-0">
+                <h3 class="truncate font-semibold text-gray-900 dark:text-white">{{ sub.plan.name }}</h3>
+                <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">#{{ sub.id }} · {{ formatExpirationDate(sub.expires_at) }}</p>
+              </div>
+              <button v-if="sub.status === 'active' && Date.parse(sub.expires_at) > Date.now()" class="btn btn-primary btn-sm shrink-0" @click="renewShared(sub)">{{ t('sharedSubscriptions.renew') }}</button>
+            </header>
+            <div class="space-y-4 p-4">
+              <div v-for="window in sub.windows" :key="window.kind" class="space-y-2">
+                <div class="flex items-center justify-between gap-3 text-sm">
+                  <span class="font-medium text-gray-700 dark:text-gray-300">{{ t(`sharedSubscriptions.${window.kind}`) }}</span>
+                  <span class="tabular-nums text-gray-500 dark:text-dark-400">{{ window.limit == null ? `${t('sharedSubscriptions.used')} ${money(window.used)}` : `${money(window.used)} / ${money(window.limit)}` }}</span>
+                </div>
+                <div v-if="window.limit != null" class="flex h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600" role="progressbar" :aria-valuenow="Math.round(sharedPercent(window))" aria-valuemin="0" aria-valuemax="100" :aria-label="t(`sharedSubscriptions.${window.kind}`)">
+                  <div class="h-full bg-teal-500 transition-[width] duration-300" :style="{ width: `${sharedUsedPercent(window)}%` }" />
+                  <div class="h-full bg-amber-400 transition-[width] duration-300" :style="{ width: `${sharedReservedPercent(window)}%` }" />
+                </div>
+                <div class="flex justify-between text-xs text-gray-500 dark:text-dark-400">
+                  <span>{{ t('sharedSubscriptions.used') }} {{ money(window.used) }}<template v-if="window.reserved > 0"> · {{ t('sharedSubscriptions.reserved') }} {{ money(window.reserved) }}</template></span>
+                  <span v-if="window.limit != null">{{ t('sharedSubscriptions.unused') }} {{ money(Math.max(0, window.limit - window.used - window.reserved)) }}</span>
+                  <span v-else>{{ t('sharedSubscriptions.unlimited') }}</span>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section v-if="!loading && sharedHistory.length" class="card overflow-hidden">
+        <div class="border-b border-gray-100 px-4 py-3 dark:border-dark-700">
+          <h2 class="font-semibold text-gray-900 dark:text-white">{{ t('sharedSubscriptions.history') }}</h2>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-dark-900 dark:text-dark-400">
+              <tr>
+                <th class="px-4 py-2">{{ t('sharedSubscriptions.time') }}</th>
+                <th class="px-4 py-2">{{ t('sharedSubscriptions.group') }}</th>
+                <th class="px-4 py-2 text-right">{{ t('sharedSubscriptions.cost') }}</th>
+                <th class="px-4 py-2 text-right">{{ t('sharedSubscriptions.poolCost') }}</th>
+                <th class="px-4 py-2 text-right">{{ t('sharedSubscriptions.walletCost') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+              <tr v-for="item in sharedHistory" :key="`${item.request_id}-${item.group_id}`">
+                <td class="whitespace-nowrap px-4 py-2 text-gray-600 dark:text-dark-300">{{ formatDateTimeToMinute(item.billing_at) }}</td>
+                <td class="px-4 py-2 text-gray-600 dark:text-dark-300">#{{ item.group_id }}</td>
+                <td class="px-4 py-2 text-right tabular-nums">{{ money(item.cost) }}</td>
+                <td class="px-4 py-2 text-right tabular-nums text-teal-700 dark:text-teal-300">{{ money(item.subscription_cost) }}</td>
+                <td class="px-4 py-2 text-right tabular-nums">{{ money(item.balance_cost) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { nextTick, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import subscriptionsAPI from '@/api/subscriptions'
+import { sharedSubscriptionsAPI, type SharedSettlement, type SharedSubscription } from '@/api/sharedSubscriptions'
 import type { UserSubscription } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -278,9 +339,12 @@ function platformAccentDotClass(p: string): string {
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const appStore = useAppStore()
 
 const subscriptions = ref<UserSubscription[]>([])
+const sharedSubscriptions = ref<SharedSubscription[]>([])
+const sharedHistory = ref<SharedSettlement[]>([])
 const loading = ref(true)
 
 function subscriptionHasPeakRate(subscription: UserSubscription): boolean {
@@ -294,13 +358,55 @@ function subscriptionPeakRateLabel(subscription: UserSubscription): string {
 async function loadSubscriptions() {
   try {
     loading.value = true
-    subscriptions.value = await subscriptionsAPI.getMySubscriptions()
+    const [legacy, shared, history] = await Promise.all([
+      subscriptionsAPI.getMySubscriptions(),
+      sharedSubscriptionsAPI.subscriptions(),
+      sharedSubscriptionsAPI.history()
+    ])
+    subscriptions.value = legacy.filter(subscription => isSubscriptionVisible(subscription.status, subscription.expires_at))
+    sharedSubscriptions.value = shared.filter(subscription => isSubscriptionVisible(subscription.status, subscription.expires_at))
+    sharedHistory.value = history
   } catch (error) {
     console.error('Failed to load subscriptions:', error)
     appStore.showError(t('userSubscriptions.failedToLoad'))
   } finally {
     loading.value = false
   }
+  await nextTick()
+  if (route.hash === '#shared-subscriptions' && sharedSubscriptions.value.length) {
+    document.getElementById('shared-subscriptions')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+  }
+}
+
+function isSubscriptionVisible(status: string, expiresAt?: string | null): boolean {
+  if (status === 'expired') return false
+  if (!expiresAt) return true
+  const expiresAtMs = Date.parse(expiresAt)
+  return !Number.isFinite(expiresAtMs) || expiresAtMs > Date.now()
+}
+
+function money(value: number): string {
+  const digits = Math.abs(value) > 0 && Math.abs(value) < 0.01 ? 6 : Math.abs(value) < 1 ? 4 : 2
+  return `$${value.toFixed(digits).replace(/0+$/, '').replace(/\.$/, '')}`
+}
+
+function sharedPercent(window: SharedSubscription['windows'][number]): number {
+  if (window.limit == null || window.limit <= 0) return 0
+  return Math.min(100, Math.max(0, ((window.used + window.reserved) / window.limit) * 100))
+}
+
+function sharedUsedPercent(window: SharedSubscription['windows'][number]): number {
+  if (window.limit == null || window.limit <= 0) return 0
+  return Math.min(100, Math.max(0, (window.used / window.limit) * 100))
+}
+
+function sharedReservedPercent(window: SharedSubscription['windows'][number]): number {
+  if (window.limit == null || window.limit <= 0) return 0
+  return Math.min(100 - sharedUsedPercent(window), Math.max(0, (window.reserved / window.limit) * 100))
+}
+
+function renewShared(sub: SharedSubscription) {
+  void router.push({ path: '/purchase', query: { tab: 'subscription', shared_plan_id: sub.plan_id, renew_subscription_id: sub.id } })
 }
 
 function getProgressWidth(used: number | undefined, limit: number | null | undefined): string {

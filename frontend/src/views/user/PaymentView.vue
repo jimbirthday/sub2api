@@ -121,9 +121,10 @@
                 <p v-if="selectedPlan.description" class="mt-2 text-sm leading-relaxed text-gray-500 dark:text-gray-400">
                   {{ selectedPlan.description }}
                 </p>
+                <p v-if="selectedPlan.shared" class="mt-3 text-sm text-gray-600 dark:text-gray-300">{{ Object.values(selectedPlan.group_names || {}).join(' · ') }}<br />{{ t('sharedSubscriptions.billingHint') }}<br />{{ t('sharedSubscriptions.stackingHint') }}</p>
                 <!-- Rate + Limits grid -->
                 <div class="mt-3 grid grid-cols-2 gap-3">
-                  <div>
+                  <div v-if="!selectedPlan.shared">
                     <span class="text-xs text-gray-400 dark:text-gray-500">{{ t('payment.planCard.rate') }}</span>
                     <div class="flex items-baseline">
                       <span :class="['text-lg font-bold', planTextClass]">×{{ selectedPlan.rate_multiplier ?? 1 }}</span>
@@ -152,6 +153,29 @@
                     <div class="text-lg font-semibold text-gray-800 dark:text-gray-200">{{ t('payment.planCard.unlimited') }}</div>
                   </div>
                 </div>
+              </div>
+              <div v-if="selectedPlan.shared" class="card p-5">
+                <h4 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('sharedSubscriptions.purchaseMode') }}</h4>
+                <div class="mt-3 grid gap-2 sm:grid-cols-3">
+                  <label class="flex cursor-pointer gap-2 rounded-xl border p-3 text-sm dark:border-dark-600" :class="sharedPurchaseMode === 'new' ? 'border-primary-500 bg-primary-50 dark:border-primary-400 dark:bg-primary-900/20' : 'border-gray-200'">
+                    <input v-model="sharedPurchaseMode" type="radio" value="new" @change="sharedTargetSubscriptionId = 0" />
+                    <span><strong class="block">{{ t('sharedSubscriptions.purchaseNew') }}</strong><small class="text-gray-500 dark:text-dark-400">{{ t('sharedSubscriptions.purchaseNewHint') }}</small></span>
+                  </label>
+                  <label class="flex gap-2 rounded-xl border p-3 text-sm dark:border-dark-600" :class="[sharedPurchaseMode === 'renew' ? 'border-primary-500 bg-primary-50 dark:border-primary-400 dark:bg-primary-900/20' : 'border-gray-200', renewTargets.length ? 'cursor-pointer' : 'cursor-not-allowed opacity-50']">
+                    <input v-model="sharedPurchaseMode" type="radio" value="renew" :disabled="!renewTargets.length" @change="selectDefaultSharedTarget('renew')" />
+                    <span><strong class="block">{{ t('sharedSubscriptions.purchaseRenew') }}</strong><small class="text-gray-500 dark:text-dark-400">{{ t('sharedSubscriptions.purchaseRenewHint') }}</small></span>
+                  </label>
+                  <label class="flex gap-2 rounded-xl border p-3 text-sm dark:border-dark-600" :class="[sharedPurchaseMode === 'replace' ? 'border-primary-500 bg-primary-50 dark:border-primary-400 dark:bg-primary-900/20' : 'border-gray-200', replaceTargets.length ? 'cursor-pointer' : 'cursor-not-allowed opacity-50']">
+                    <input v-model="sharedPurchaseMode" type="radio" value="replace" :disabled="!replaceTargets.length" @change="selectDefaultSharedTarget('replace')" />
+                    <span><strong class="block">{{ t('sharedSubscriptions.purchaseReplace') }}</strong><small class="text-gray-500 dark:text-dark-400">{{ t('sharedSubscriptions.purchaseReplaceHint') }}</small></span>
+                  </label>
+                </div>
+                <label v-if="sharedPurchaseMode !== 'new'" class="mt-3 block text-sm text-gray-700 dark:text-gray-300">
+                  {{ t('sharedSubscriptions.targetSubscription') }}
+                  <select v-model.number="sharedTargetSubscriptionId" class="input mt-1 w-full">
+                    <option v-for="sub in sharedTargetOptions" :key="sub.id" :value="sub.id">{{ sub.plan.name }} · #{{ sub.id }} · {{ new Date(sub.expires_at).toLocaleDateString() }}</option>
+                  </select>
+                </label>
               </div>
               <div v-if="enabledMethods.length >= 1" class="card p-6">
                 <PaymentMethodSelector
@@ -192,7 +216,7 @@
                 <p class="text-gray-500 dark:text-gray-400">{{ t('payment.noPlans') }}</p>
               </div>
               <div v-else :class="planGridClass">
-                <SubscriptionPlanCard v-for="plan in checkout.plans" :key="plan.id" :plan="plan" :active-subscriptions="activeSubscriptions" @select="selectPlan" />
+                <SubscriptionPlanCard v-for="plan in checkout.plans" :key="`${plan.shared ? 'shared' : 'legacy'}-${plan.id}`" :plan="plan" :active-subscriptions="activeSubscriptions" @select="selectPlan" />
               </div>
               <!-- Active subscriptions (compact, below plan list) -->
               <div v-if="activeSubscriptions.length > 0">
@@ -242,7 +266,7 @@
             </button>
             <h3 class="mb-4 shrink-0 text-lg font-semibold text-gray-900 dark:text-white">{{ t('payment.selectPlan') }}</h3>
             <div class="min-h-0 space-y-4 overflow-y-auto">
-              <SubscriptionPlanCard v-for="plan in renewalPlans" :key="plan.id" :plan="plan" :active-subscriptions="activeSubscriptions" @select="selectPlanFromModal" />
+              <SubscriptionPlanCard v-for="plan in renewalPlans" :key="`${plan.shared ? 'shared' : 'legacy'}-${plan.id}`" :plan="plan" :active-subscriptions="activeSubscriptions" @select="selectPlanFromModal" />
             </div>
           </div>
         </div>
@@ -269,8 +293,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { usePaymentStore } from '@/stores/payment'
 import { useSubscriptionStore } from '@/stores/subscriptions'
+import { requestSharedSubscriptionsRefresh } from '@/utils/sharedSubscriptions'
 import { useAppStore } from '@/stores'
 import { FeatureFlags, resolveFeatureFlag } from '@/utils/featureFlags'
+import { sharedSubscriptionsAPI, sharedCheckoutPlan, type SharedSubscription } from '@/api/sharedSubscriptions'
 import { paymentAPI } from '@/api/payment'
 import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
 import { isMobileDevice } from '@/utils/device'
@@ -334,6 +360,9 @@ const activeTab = ref<'recharge' | 'subscription'>('recharge')
 const amount = ref<number | null>(null)
 const selectedMethod = ref('')
 const selectedPlan = ref<SubscriptionPlan | null>(null)
+const sharedSubscriptions = ref<SharedSubscription[]>([])
+const sharedPurchaseMode = ref<'new' | 'renew' | 'replace'>('new')
+const sharedTargetSubscriptionId = ref(0)
 const previewImage = ref('')
 
 const paymentPhase = ref<'select' | 'paying'>('select')
@@ -467,6 +496,10 @@ function buildWechatOAuthAuthorizeUrl(
 
     if (context.planId) {
       redirectUrl.searchParams.set('plan_id', String(context.planId))
+      if (context.orderType === 'shared_subscription') {
+        redirectUrl.searchParams.set('shared_plan_id', String(context.planId))
+        if (route.query.renew_subscription_id) redirectUrl.searchParams.set('renew_subscription_id', String(route.query.renew_subscription_id))
+      }
     } else {
       redirectUrl.searchParams.delete('plan_id')
     }
@@ -477,6 +510,7 @@ function buildWechatOAuthAuthorizeUrl(
       redirectUrl.searchParams.delete('amount')
     }
 
+    if (context.orderType === 'shared_subscription' && route.query.renew_subscription_id) targetUrl.searchParams.set('renew_subscription_id', String(route.query.renew_subscription_id))
     targetUrl.searchParams.set('redirect', `${redirectUrl.pathname}${redirectUrl.search}`)
     return targetUrl.toString()
   } catch {
@@ -485,11 +519,15 @@ function buildWechatOAuthAuthorizeUrl(
 }
 
 function onPaymentDone() {
-  const wasSubscription = paymentState.value.orderType === 'subscription'
+  const orderType = paymentState.value.orderType
+  const wasSubscription = orderType === 'subscription'
   resetPayment()
   selectedPlan.value = null
   if (wasSubscription) {
     subscriptionStore.fetchActiveSubscriptions(true).catch(() => {})
+  }
+  if (orderType === 'shared_subscription') {
+    requestSharedSubscriptionsRefresh()
   }
 }
 
@@ -499,6 +537,9 @@ async function onPaymentSuccess() {
   authStore.refreshUser()
   if (paymentState.value.orderType === 'subscription') {
     subscriptionStore.fetchActiveSubscriptions(true).catch(() => {})
+  }
+  if (paymentState.value.orderType === 'shared_subscription') {
+    requestSharedSubscriptionsRefresh()
   }
   await redirectToPaymentResult(completedPayment)
 }
@@ -715,6 +756,7 @@ const subMethodOptions = computed<PaymentMethodOption[]>(() => {
 
 const canSubmitSubscription = computed(() =>
   selectedPlan.value !== null
+    && (!selectedPlan.value.shared || sharedPurchaseMode.value === 'new' || sharedTargetSubscriptionId.value > 0)
     && amountFitsMethod(subTotalAmount.value, selectedMethod.value)
     && selectedLimit.value?.available !== false
 )
@@ -749,6 +791,31 @@ const renewalPlans = computed(() => {
   return checkout.value.plans.filter(p => p.group_id === renewGroupId.value)
 })
 
+const activeSharedSubscriptions = computed(() => sharedSubscriptions.value.filter(sub => sub.status === 'active' && Date.parse(sub.expires_at) > Date.now()))
+const renewTargets = computed(() => activeSharedSubscriptions.value.filter(sub => sub.plan_id === selectedPlan.value?.id))
+const replaceTargets = computed(() => activeSharedSubscriptions.value)
+const sharedTargetOptions = computed(() => sharedPurchaseMode.value === 'renew' ? renewTargets.value : replaceTargets.value)
+
+function selectDefaultSharedTarget(mode: 'renew' | 'replace') {
+  const options = mode === 'renew' ? renewTargets.value : replaceTargets.value
+  if (!options.some(sub => sub.id === sharedTargetSubscriptionId.value)) sharedTargetSubscriptionId.value = options[0]?.id || 0
+}
+
+function initializeSharedPurchaseMode() {
+  const renewID = Number(route.query.renew_subscription_id) || 0
+  const replaceID = Number(route.query.replace_subscription_id) || 0
+  if (renewID && renewTargets.value.some(sub => sub.id === renewID)) {
+    sharedPurchaseMode.value = 'renew'
+    sharedTargetSubscriptionId.value = renewID
+  } else if (replaceID && replaceTargets.value.some(sub => sub.id === replaceID)) {
+    sharedPurchaseMode.value = 'replace'
+    sharedTargetSubscriptionId.value = replaceID
+  } else {
+    sharedPurchaseMode.value = 'new'
+    sharedTargetSubscriptionId.value = 0
+  }
+}
+
 const planValiditySuffix = computed(() => {
   if (!selectedPlan.value) return ''
   return validitySuffixOf(selectedPlan.value, t)
@@ -763,15 +830,26 @@ function planPeakRateLabel(plan: SubscriptionPlan): string {
 }
 
 function selectPlan(plan: SubscriptionPlan) {
+  // Selecting a catalog card is a new purchase, even after arriving via renewal.
+	if (route.query.renew_subscription_id || route.query.replace_subscription_id || route.query.shared_plan_id) {
+    const query = { ...route.query }
+    delete query.renew_subscription_id
+    delete query.replace_subscription_id
+    delete query.shared_plan_id
+    void router.replace({ path: route.path, query })
+  }
   selectedPlan.value = plan
+  sharedPurchaseMode.value = 'new'
+  sharedTargetSubscriptionId.value = 0
   errorMessage.value = ''
 }
 
 function selectPlanFromModal(plan: SubscriptionPlan) {
   showRenewalModal.value = false
   renewGroupId.value = null
-  selectedPlan.value = plan
-  errorMessage.value = ''
+	selectedPlan.value = plan
+	initializeSharedPurchaseMode()
+	errorMessage.value = ''
 }
 
 function closeRenewalModal() {
@@ -786,7 +864,7 @@ async function handleSubmitRecharge() {
 
 async function confirmSubscribe() {
   if (!selectedPlan.value || submitting.value) return
-  await createOrder(selectedPlan.value.price, 'subscription', selectedPlan.value.id)
+  await createOrder(selectedPlan.value.price, selectedPlan.value.shared ? 'shared_subscription' : 'subscription', selectedPlan.value.id)
 }
 
 async function createOrder(orderAmount: number, orderType: OrderType, planId?: number, options: CreateOrderOptions = {}) {
@@ -800,6 +878,8 @@ async function createOrder(orderAmount: number, orderType: OrderType, planId?: n
       paymentType: requestType,
       orderType,
       planId,
+	      renewSubscriptionId: sharedPurchaseMode.value === 'renew' ? sharedTargetSubscriptionId.value : undefined,
+      replaceSubscriptionId: sharedPurchaseMode.value === 'replace' ? sharedTargetSubscriptionId.value : undefined,
       origin: typeof window !== 'undefined' ? window.location.origin : '',
       isMobile: isMobileDevice(),
       isWechatBrowser: typeof window !== 'undefined' && /MicroMessenger/i.test(window.navigator.userAgent),
@@ -1028,6 +1108,8 @@ async function attemptMobileQrFallback(err: unknown, context: MobileQrFallbackCo
       paymentType: visibleMethod,
       orderType: context.orderType,
       planId: context.planId,
+      renewSubscriptionId: sharedPurchaseMode.value === 'renew' ? sharedTargetSubscriptionId.value : undefined,
+      replaceSubscriptionId: sharedPurchaseMode.value === 'replace' ? sharedTargetSubscriptionId.value : undefined,
       origin: typeof window !== 'undefined' ? window.location.origin : '',
       isMobile: false,
       isWechatBrowser: false,
@@ -1097,8 +1179,8 @@ async function resumeWechatPaymentFromQuery() {
   if (resume.orderType === 'balance' && resume.orderAmount > 0) {
     amount.value = resume.orderAmount
   }
-  if (resume.orderType === 'subscription' && resume.planId) {
-    selectedPlan.value = checkout.value.plans.find(plan => plan.id === resume.planId) ?? null
+  if (resume.orderType !== 'balance' && resume.planId) {
+    selectedPlan.value = checkout.value.plans.find(plan => plan.id === resume.planId && !!plan.shared === (resume.orderType === 'shared_subscription')) ?? null
   }
 
   await router.replace({ path: route.path, query: stripWechatResumeQuery(route.query) })
@@ -1125,6 +1207,26 @@ onMounted(async () => {
   try {
     const res = await paymentAPI.getCheckoutInfo()
     checkout.value = res.data
+	    if (subscriptionEnabled.value) {
+	      try {
+	        const [sharedPlans, mine] = await Promise.all([
+	          sharedSubscriptionsAPI.plans(),
+	          typeof sharedSubscriptionsAPI.subscriptions === 'function' ? sharedSubscriptionsAPI.subscriptions() : Promise.resolve([]),
+	        ])
+	        sharedSubscriptions.value = mine
+        checkout.value.plans = [...checkout.value.plans, ...sharedPlans.map(sharedCheckoutPlan)]
+      } catch (err) {
+        appStore.showError(extractApiErrorMessage(err) || t('sharedSubscriptions.unavailable'))
+      }
+      const sharedPlanId = Number(route.query.shared_plan_id || (route.query.order_type === 'shared_subscription' ? route.query.plan_id : 0))
+      if (sharedPlanId) {
+        const plan = checkout.value.plans.find(p => p.shared && p.id === sharedPlanId)
+        if (!plan) appStore.showError(t('sharedSubscriptions.unavailable'))
+        activeTab.value = 'subscription'
+	        selectedPlan.value = plan ?? null
+	        initializeSharedPurchaseMode()
+      }
+    }
     if (enabledMethods.value.length) {
       const order: readonly string[] = METHOD_ORDER
       const sorted = [...enabledMethods.value].sort((a, b) => {

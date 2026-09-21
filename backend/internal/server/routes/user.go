@@ -72,6 +72,12 @@ func RegisterUserRoutes(
 			}
 		}
 
+		if h.SharedSubscription != nil {
+			shared := authenticated.Group("/shared-subscriptions")
+			shared.GET("/plans", h.SharedSubscription.Plans)
+			shared.GET("", h.SharedSubscription.Mine)
+			shared.GET("/history", h.SharedSubscription.History)
+		}
 		// API Key管理
 		keys := authenticated.Group("/keys")
 		{

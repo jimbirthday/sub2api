@@ -104,6 +104,11 @@ type subscriptionCacheInvalidationPubSub interface {
 // BillingCacheService 计费缓存服务
 // 负责余额和订阅数据的缓存管理，提供高性能的计费资格检查
 type BillingCacheService struct {
+	sharedSubscriptions   *SharedSubscriptionService
+	sharedRecoveryRepo    UsageBillingRepository
+	sharedAuthInvalidator interface{ InvalidateAuthCacheByUserID(context.Context, int64) }
+	sharedRecoveryCancel  context.CancelFunc
+	sharedRecoveryWG      sync.WaitGroup
 	cache                 BillingCache
 	userRepo              UserRepository
 	subRepo               UserSubscriptionRepository
@@ -157,6 +162,10 @@ func NewBillingCacheService(
 // Stop 关闭缓存写入工作池
 func (s *BillingCacheService) Stop() {
 	s.cacheWriteStopOnce.Do(func() {
+		if s.sharedRecoveryCancel != nil {
+			s.sharedRecoveryCancel()
+			s.sharedRecoveryWG.Wait()
+		}
 		s.stopped.Store(true)
 
 		s.cacheWriteMu.Lock()
@@ -744,7 +753,14 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 	// 判断计费模式
 	isSubscriptionMode := group != nil && group.IsSubscriptionType() && subscription != nil
 
-	if isSubscriptionMode {
+	if apiKey != nil && apiKey.SharedFunding != nil {
+		if !apiKey.SharedFunding.Available {
+			if err := s.checkBalanceEligibility(ctx, user.ID); err != nil {
+				return err
+			}
+		}
+		isSubscriptionMode = false
+	} else if isSubscriptionMode {
 		if err := s.checkSubscriptionEligibility(ctx, user.ID, group, subscription); err != nil {
 			return err
 		}

@@ -26,6 +26,11 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if req.OrderType == "" {
 		req.OrderType = payment.OrderTypeBalance
 	}
+	if req.OrderType == SharedSubscriptionOrderType {
+		if err := s.validateSharedOrder(ctx, &req); err != nil {
+			return nil, err
+		}
+	}
 	if normalized := NormalizeVisibleMethod(req.PaymentType); normalized != "" {
 		req.PaymentType = normalized
 	}
@@ -115,6 +120,18 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 }
 
 func (s *PaymentService) validateOrderInput(ctx context.Context, req CreateOrderRequest, cfg *PaymentConfig) (*dbent.SubscriptionPlan, error) {
+	if req.OrderType == SharedSubscriptionOrderType {
+		if req.sharedPlan == nil {
+			if err := s.validateSharedOrder(ctx, &req); err != nil {
+				return nil, err
+			}
+		}
+		return SharedPlanToPaymentDisplay(req.sharedPlan), nil
+	}
+	if req.OrderType != payment.OrderTypeBalance && req.OrderType != payment.OrderTypeSubscription {
+		return nil, infraerrors.BadRequest("INVALID_ORDER_TYPE", "unknown order type")
+	}
+
 	if req.OrderType == payment.OrderTypeBalance && cfg.BalanceDisabled {
 		return nil, infraerrors.Forbidden("BALANCE_PAYMENT_DISABLED", "balance recharge has been disabled")
 	}
@@ -206,12 +223,20 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 	if providerSnapshot != nil {
 		b.SetProviderSnapshot(providerSnapshot)
 	}
-	if plan != nil {
+	if plan != nil && req.OrderType != SharedSubscriptionOrderType {
 		b.SetPlanID(plan.ID).SetSubscriptionGroupID(plan.GroupID).SetSubscriptionDays(psComputeValidityDays(plan.ValidityDays, plan.ValidityUnit))
 	}
 	order, err := b.Save(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("create order: %w", err)
+	}
+	if req.OrderType == SharedSubscriptionOrderType {
+		if req.sharedPlan == nil {
+			return nil, fmt.Errorf("shared plan snapshot missing")
+		}
+		if err = s.sharedSubscriptions.repo.SaveOrder(dbent.NewTxContext(ctx, tx), order.ID, req.sharedPlan, req.RenewSharedSubscriptionID, req.ReplaceSharedSubscriptionID); err != nil {
+			return nil, err
+		}
 	}
 	code := fmt.Sprintf("PAY-%d-%d", order.ID, time.Now().UnixNano()%100000)
 	order, err = tx.PaymentOrder.UpdateOneID(order.ID).SetRechargeCode(code).Save(ctx)
@@ -645,7 +670,7 @@ func calculateCreateOrderPayAmount(limitAmount, feeRate float64, currency string
 
 func calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate float64, currency, orderType string, usdToCnyRate float64) (string, float64, error) {
 	paymentAmount := limitAmount
-	if orderType == payment.OrderTypeSubscription {
+	if orderType == payment.OrderTypeSubscription || orderType == SharedSubscriptionOrderType {
 		paymentAmount = calculateSubscriptionGatewayBaseAmount(limitAmount, usdToCnyRate, currency)
 	}
 	return calculateCreateOrderPayAmount(paymentAmount, feeRate, currency)
@@ -769,6 +794,12 @@ func buildWeChatPaymentOAuthStartURL(req CreateOrderRequest, scope string) (stri
 	}
 	if req.PlanID > 0 {
 		q.Set("plan_id", strconv.FormatInt(req.PlanID, 10))
+		if req.OrderType == SharedSubscriptionOrderType && req.RenewSharedSubscriptionID > 0 {
+			q.Set("renew_subscription_id", strconv.FormatInt(req.RenewSharedSubscriptionID, 10))
+		}
+		if req.OrderType == SharedSubscriptionOrderType && req.ReplaceSharedSubscriptionID > 0 {
+			q.Set("replace_subscription_id", strconv.FormatInt(req.ReplaceSharedSubscriptionID, 10))
+		}
 	}
 	if scope = strings.TrimSpace(scope); scope != "" {
 		q.Set("scope", scope)

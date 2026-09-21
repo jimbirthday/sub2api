@@ -167,6 +167,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
+	if apiKey.SharedFunding != nil {
+		subscription = nil
+	}
 	billingAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
 		return err
@@ -323,8 +326,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	// Determine billing type
-	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+	isSubscriptionBilling := apiKey.SharedFunding == nil && subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 	billingType := BillingTypeBalance
+	if apiKey.SharedFunding != nil {
+		billingType = BillingTypeSharedSubscription
+	}
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription
 	}
@@ -516,7 +522,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}()
 
 	if billingErr != nil {
-		usageLog.ActualCost = 0
+		if apiKey.SharedFunding == nil {
+			usageLog.ActualCost = 0
+		}
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		return billingErr
 	}

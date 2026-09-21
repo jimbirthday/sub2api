@@ -49,3 +49,28 @@ func TestUsageUnrestrictedIncludesWeeklyWindowStart(t *testing.T) {
 	require.NotNil(t, response.Subscription.WeeklyWindowStart)
 	require.True(t, weeklyWindowStart.Equal(*response.Subscription.WeeklyWindowStart))
 }
+
+func TestUsageSharedSubscriptionIncludesPoolAndWallet(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, unlimited := range []bool{false, true} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1/usage", nil)
+		limit := 10.0
+		window := service.SharedQuotaWindow{Limit: &limit, Used: 3, Reserved: 2}
+		if unlimited {
+			window.Limit = nil
+		}
+		key := &service.APIKey{User: &service.User{Balance: 4}, SharedFunding: &service.SharedFunding{Pools: []service.SharedPoolAuthorization{{Windows: []service.SharedQuotaWindow{window}}}}}
+		(&GatewayHandler{}).usageUnrestricted(c, context.Background(), key, middleware.AuthSubject{}, nil, nil, nil)
+		require.Equal(t, 200, recorder.Code)
+		var response map[string]any
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+		expected := 9.0
+		if unlimited {
+			expected = -1
+		}
+		require.Equal(t, expected, response["remaining"])
+		require.Equal(t, 4.0, response["balance"])
+	}
+}

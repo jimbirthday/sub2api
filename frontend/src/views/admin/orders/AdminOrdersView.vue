@@ -210,6 +210,7 @@ const paymentTypeFilterOptions = computed(() => [
 ])
 
 const orderTypeFilterOptions = computed(() => [
+ { value: 'shared_subscription', label: t('sharedSubscriptions.title') },
   { value: '', label: t('payment.admin.allOrderTypes') },
   { value: 'balance', label: t('payment.admin.balanceOrder') },
   { value: 'subscription', label: t('payment.admin.subscriptionOrder') },

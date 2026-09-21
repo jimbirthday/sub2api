@@ -218,6 +218,9 @@ func (s *PaymentService) executeFulfillment(ctx context.Context, oid int64) erro
 	if err != nil {
 		return fmt.Errorf("get order: %w", err)
 	}
+	if o.OrderType == SharedSubscriptionOrderType {
+		return s.ExecuteSharedSubscriptionFulfillment(ctx, o.ID)
+	}
 	if o.OrderType == payment.OrderTypeSubscription {
 		return s.ExecuteSubscriptionFulfillment(ctx, oid)
 	}
@@ -741,7 +744,7 @@ func affiliateRebateBaseAmount(o *dbent.PaymentOrder) float64 {
 		return 0
 	}
 	switch o.OrderType {
-	case payment.OrderTypeBalance, payment.OrderTypeSubscription:
+	case payment.OrderTypeBalance, payment.OrderTypeSubscription, SharedSubscriptionOrderType:
 		return o.Amount
 	default:
 		return 0

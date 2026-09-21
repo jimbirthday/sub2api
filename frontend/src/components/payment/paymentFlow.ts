@@ -81,6 +81,8 @@ export interface BuildCreateOrderPayloadInput {
   paymentType: string
   orderType: OrderType
   planId?: number
+  renewSubscriptionId?: number
+  replaceSubscriptionId?: number
   origin?: string
   isMobile: boolean
   isWechatBrowser: boolean
@@ -139,6 +141,8 @@ export function buildCreateOrderPayload(input: BuildCreateOrderPayloadInput): Cr
   if (input.planId) {
     payload.plan_id = input.planId
   }
+  if (input.orderType === 'shared_subscription' && input.renewSubscriptionId) payload.renew_subscription_id = input.renewSubscriptionId
+  if (input.orderType === 'shared_subscription' && input.replaceSubscriptionId) payload.replace_subscription_id = input.replaceSubscriptionId
   if (normalizedOrigin) {
     payload.return_url = `${normalizedOrigin}/payment/result`
   }
@@ -324,7 +328,7 @@ export function readPaymentRecoverySnapshot(
       countryCode: parsed.countryCode || '',
       paymentEnv: parsed.paymentEnv || '',
       payAmount: parsed.payAmount,
-      orderType: parsed.orderType === 'subscription' ? 'subscription' : 'balance',
+      orderType: parsed.orderType === 'shared_subscription' ? 'shared_subscription' : parsed.orderType === 'subscription' ? 'subscription' : 'balance',
       paymentMode: parsed.paymentMode,
       resumeToken: parsed.resumeToken,
       alipayMobilePrecreateDeepLink: parsed.alipayMobilePrecreateDeepLink === true,

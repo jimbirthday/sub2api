@@ -54,6 +54,7 @@ vi.mock('@/api/payment', () => ({
 import PaymentResultView from '../PaymentResultView.vue'
 import { PAYMENT_RECOVERY_STORAGE_KEY } from '@/components/payment/paymentFlow'
 import { formatPaymentAmount } from '@/components/payment/currency'
+import { SHARED_SUBSCRIPTIONS_REFRESH_EVENT } from '@/utils/sharedSubscriptions'
 
 const orderFactory = (status: string) => ({
   id: 42,
@@ -105,6 +106,22 @@ describe('PaymentResultView', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('refreshes the shared header only after a paid subscription finishes fulfillment', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    routeState.query = { order_id: '42' }
+    const refresh = vi.fn()
+    window.addEventListener(SHARED_SUBSCRIPTIONS_REFRESH_EVENT, refresh)
+    pollOrderStatus.mockResolvedValueOnce({ ...orderFactory('PAID'), order_type: 'shared_subscription' })
+      .mockResolvedValueOnce({ ...orderFactory('COMPLETED'), order_type: 'shared_subscription' })
+    const wrapper = mount(PaymentResultView, { global: { stubs: { OrderStatusBadge: true } } })
+    await flushPromises()
+    expect(refresh).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(2000); await flushPromises()
+    expect(refresh).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+    window.removeEventListener(SHARED_SUBSCRIPTIONS_REFRESH_EVENT, refresh)
   })
 
   it('renders a pending state instead of a failure state when the restored order is still pending', async () => {

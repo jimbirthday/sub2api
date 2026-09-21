@@ -1003,6 +1003,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							return
 						}
 						fallbackAPIKey := cloneAPIKeyWithGroup(apiKey, fallbackGroup)
+						fallbackAPIKey, err = h.apiKeyService.WithSharedFunding(c.Request.Context(), fallbackAPIKey)
+						if err != nil {
+							h.handleStreamingAwareError(c, 503, "BILLING_SERVICE_ERROR", "Failed to resolve fallback billing source", streamStarted)
+							return
+						}
 						if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), fallbackAPIKey.User, fallbackAPIKey, fallbackGroup, nil, service.PlatformFromAPIKey(fallbackAPIKey)); err != nil {
 							status, code, message, retryAfter := billingErrorDetails(err)
 							if retryAfter > 0 {
@@ -1522,6 +1527,7 @@ func cloneAPIKeyWithGroup(apiKey *service.APIKey, group *service.Group) *service
 	groupID := group.ID
 	cloned.GroupID = &groupID
 	cloned.Group = group
+	cloned.SharedFunding = nil
 	return &cloned
 }
 
@@ -1739,6 +1745,42 @@ func (h *GatewayHandler) usageQuotaLimited(c *gin.Context, ctx context.Context, 
 
 // usageUnrestricted 处理 unrestricted 模式的响应（向后兼容）
 func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, apiKey *service.APIKey, subject middleware2.AuthSubject, usageData gin.H, dailyUsage any, modelStats any) {
+	if apiKey.SharedFunding != nil {
+		balance := 0.0
+		if apiKey.User != nil {
+			balance = apiKey.User.Balance
+		}
+		if h.userService != nil {
+			latest, err := h.userService.GetByID(ctx, subject.UserID)
+			if err != nil {
+				h.errorResponse(c, 500, "api_error", "Failed to get user info")
+				return
+			}
+			balance = latest.Balance
+		}
+		available := 0.0
+		for _, pool := range apiKey.SharedFunding.Pools {
+			available += service.SharedAvailable(pool.Windows)
+		}
+		remaining := available + math.Max(0, balance)
+		if math.IsInf(available, 1) {
+			available = -1
+			remaining = -1
+		}
+		resp := gin.H{"mode": "unrestricted", "isValid": true, "planName": "共享订阅", "unit": "USD", "remaining": remaining, "balance": balance, "subscription_remaining": available, "shared_subscriptions": apiKey.SharedFunding.Pools}
+		if usageData != nil {
+			resp["usage"] = usageData
+		}
+		if dailyUsage != nil {
+			resp["daily_usage"] = dailyUsage
+		}
+		if modelStats != nil {
+			resp["model_stats"] = modelStats
+		}
+		c.JSON(http.StatusOK, resp)
+		return
+	}
+
 	// 订阅模式
 	if apiKey.Group != nil && apiKey.Group.IsSubscriptionType() {
 		resp := gin.H{

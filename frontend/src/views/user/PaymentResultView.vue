@@ -108,6 +108,7 @@ import {
 } from '@/components/payment/paymentFlow'
 import { usePaymentStore } from '@/stores/payment'
 import { useAuthStore } from '@/stores/auth'
+import { requestSharedSubscriptionsRefresh } from '@/utils/sharedSubscriptions'
 import { paymentAPI } from '@/api/payment'
 import type { PublicOrderVerifyResult } from '@/api/payment'
 import type { OrderStatus, PaymentOrder } from '@/types/payment'
@@ -137,11 +138,13 @@ const returnInfo = ref<ReturnInfo | null>(null)
 
 const SUCCESS_STATUSES = new Set(['COMPLETED', 'PAID', 'RECHARGING'])
 const PENDING_STATUSES = new Set(['PENDING', 'CREATED', 'WAITING', 'PROCESSING'])
+const FULFILLING_STATUSES = new Set(['PAID', 'RECHARGING'])
 const STATUS_REFRESH_INTERVAL_MS = 2000
 const STATUS_REFRESH_MAX_ATTEMPTS = 15
 
 let statusRefreshTimer: ReturnType<typeof setTimeout> | null = null
 let userBalanceRefreshStarted = false
+let sharedRefreshStarted = false
 const refreshAttempts = ref(0)
 
 /** 充值金额 = pay_amount / (1 + fee_rate/100)，fee_rate=0 时等于 pay_amount */
@@ -207,6 +210,10 @@ function refreshUserBalanceForSuccessfulOrder(nextOrder: ResolvedOrder | null): 
   if (!nextOrder || userBalanceRefreshStarted || normalizeOrderStatus(nextOrder.status) !== 'COMPLETED') {
     return
   }
+  if ('order_type' in nextOrder && nextOrder.order_type === 'shared_subscription' && !sharedRefreshStarted) {
+    sharedRefreshStarted = true
+    requestSharedSubscriptionsRefresh()
+  }
   if ('order_type' in nextOrder && nextOrder.order_type !== 'balance') {
     return
   }
@@ -243,6 +250,10 @@ function isSuccessStatus(status: string | null | undefined): boolean {
 
 function isPendingStatus(status: string | null | undefined): boolean {
   return PENDING_STATUSES.has(normalizeOrderStatus(status))
+}
+
+function needsStatusRefresh(status: string | null | undefined): boolean {
+  return isPendingStatus(status) || FULFILLING_STATUSES.has(normalizeOrderStatus(status))
 }
 
 function readRouteQueryString(key: string): string {
@@ -337,7 +348,7 @@ function clearRecoverySnapshotForTerminalStatus(status: string | null | undefine
 
 function scheduleStatusRefresh(refreshOrder: (() => Promise<ResolvedOrder | null>) | null): void {
   clearStatusRefreshTimer()
-  if (!refreshOrder || !isPending.value || refreshAttempts.value >= STATUS_REFRESH_MAX_ATTEMPTS) {
+  if (!refreshOrder || !needsStatusRefresh(order.value?.status) || refreshAttempts.value >= STATUS_REFRESH_MAX_ATTEMPTS) {
     return
   }
 
@@ -349,7 +360,7 @@ function scheduleStatusRefresh(refreshOrder: (() => Promise<ResolvedOrder | null
       clearRecoverySnapshotForTerminalStatus(refreshedOrder.status)
     }
 
-    if (isPendingStatus(order.value?.status)) {
+    if (needsStatusRefresh(order.value?.status)) {
       scheduleStatusRefresh(refreshOrder)
     }
   }, STATUS_REFRESH_INTERVAL_MS)
@@ -447,9 +458,10 @@ onMounted(async () => {
     return null
   }
 
-  if (isPendingStatus(order.value?.status)) {
+  if (needsStatusRefresh(order.value?.status)) {
     scheduleStatusRefresh(refreshOrder)
-  } else if (order.value) {
+  }
+  if (order.value) {
     clearRecoverySnapshotForTerminalStatus(order.value.status)
   } else if (returnInfo.value) {
     clearRecoverySnapshot()

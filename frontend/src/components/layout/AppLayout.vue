@@ -10,9 +10,10 @@
     <div
       class="relative min-h-screen transition-all duration-300"
       :class="[sidebarCollapsed ? 'lg:ml-[72px]' : 'lg:ml-64']"
+      :style="{ '--app-header-height': `${headerHeight}px` }"
     >
       <!-- Header -->
-      <AppHeader />
+      <AppHeader ref="header" />
 
       <!-- Main Content -->
       <main class="p-4 md:p-6 lg:p-8">
@@ -24,13 +25,20 @@
 
 <script setup lang="ts">
 import '@/styles/onboarding.css'
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useResizeObserver } from '@vueuse/core'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingTour } from '@/composables/useOnboardingTour'
 import { useOnboardingStore } from '@/stores/onboarding'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
+
+const header = ref<InstanceType<typeof AppHeader> | null>(null)
+const headerHeight = ref(64)
+useResizeObserver(header, ([entry]) => {
+  if (entry) headerHeight.value = entry.target.getBoundingClientRect().height
+})
 
 const appStore = useAppStore()
 const authStore = useAuthStore()

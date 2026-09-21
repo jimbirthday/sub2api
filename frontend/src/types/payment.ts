@@ -21,7 +21,7 @@ export type OrderStatus =
 
 export type PaymentType = 'alipay' | 'wxpay' | 'alipay_direct' | 'wxpay_direct' | 'stripe' | 'easypay' | 'airwallex'
 
-export type OrderType = 'balance' | 'subscription'
+export type OrderType = 'balance' | 'subscription' | 'shared_subscription'
 
 // ==================== Configuration ====================
 
@@ -109,6 +109,9 @@ export interface PaymentOrder {
 // ==================== Plans & Channels ====================
 
 export interface SubscriptionPlan {
+  shared?: boolean
+  group_names?: Record<string, string>
+  group_ids?: number[]
   id: number
   group_id: number
   group_platform?: string
@@ -167,6 +170,8 @@ export interface ProviderInstance {
 // ==================== Request / Response ====================
 
 export interface CreateOrderRequest {
+  renew_subscription_id?: number
+  replace_subscription_id?: number
   amount: number
   payment_type: string
   order_type: string

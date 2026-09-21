@@ -77,7 +77,7 @@
 
       <template #cell-order_type="{ value }">
         <span class="text-sm text-gray-700 dark:text-gray-300">
-          {{ t('payment.admin.' + value + 'Order', value) }}
+          {{ value === 'shared_subscription' ? t('sharedSubscriptions.title') : t('payment.admin.' + value + 'Order', value) }}
         </span>
       </template>
 
@@ -224,6 +224,7 @@ const paymentTypeFilterOptions = computed(() => [
 
 const orderTypeFilterOptions = computed(() => [
   { value: '', label: t('payment.admin.allOrderTypes') },
+  { value: 'shared_subscription', label: t('sharedSubscriptions.title') },
   { value: 'balance', label: t('payment.admin.balanceOrder') },
   { value: 'subscription', label: t('payment.admin.subscriptionOrder') },
 ])

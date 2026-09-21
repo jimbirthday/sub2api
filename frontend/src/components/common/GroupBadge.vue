@@ -9,6 +9,7 @@
     <PlatformIcon v-if="platform" :platform="platform" size="sm" />
     <!-- Group name -->
     <span class="truncate">{{ name }}</span>
+    <span v-if="subscriptionAvailable" class="shrink-0 rounded bg-emerald-100 px-1 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300" :title="t('sharedSubscriptions.subscriptionAvailable')" :aria-label="t('sharedSubscriptions.subscriptionAvailable')">(D)</span>
     <!-- Right side label -->
     <span v-if="showLabel" :class="labelClass">
       <template v-if="hasCustomRate">
@@ -36,6 +37,7 @@ import PlatformIcon from './PlatformIcon.vue'
 
 interface Props {
   name: string
+  subscriptionAvailable?: boolean
   platform?: GroupPlatform
   subscriptionType?: SubscriptionType
   rateMultiplier?: number

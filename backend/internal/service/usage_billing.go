@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+
 	"errors"
 	"fmt"
 	"math"
@@ -17,6 +18,9 @@ var ErrUsageBillingRequestConflict = errors.New("usage billing request fingerpri
 
 // UsageBillingCommand describes one billable request that must be applied at most once.
 type UsageBillingCommand struct {
+	SharedFunding      *SharedFunding
+	SharedCost         float64
+	SharedPlatform     string
 	RequestID          string
 	APIKeyID           int64
 	RequestFingerprint string
@@ -81,6 +85,7 @@ const UsageBillingMonetaryScale = 8
 // 在参数进入 SQL 之前量化一次，两条语句就都拿到已经落在 8 位刻度上的同一个金额，
 // 存储阶段不再发生任何舍入，delta 精确相等。
 func (c *UsageBillingCommand) quantizeMonetaryFields() {
+	c.SharedCost = QuantizeUsageBillingAmount(c.SharedCost)
 	c.BalanceCost = QuantizeUsageBillingAmount(c.BalanceCost)
 	c.SubscriptionCost = QuantizeUsageBillingAmount(c.SubscriptionCost)
 	c.APIKeyQuotaCost = QuantizeUsageBillingAmount(c.APIKeyQuotaCost)
@@ -132,6 +137,9 @@ func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 	if payloadHash := strings.TrimSpace(c.RequestPayloadHash); payloadHash != "" {
 		raw += "|" + payloadHash
 	}
+	if c.SharedFunding != nil {
+		raw += fmt.Sprintf("|shared:%d|%0.10f", c.SharedFunding.GroupID, c.SharedCost)
+	}
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
 }
@@ -163,6 +171,8 @@ type AccountQuotaState struct {
 }
 
 type UsageBillingApplyResult struct {
+	SharedConsumed       float64
+	WalletConsumed       float64
 	Applied              bool
 	APIKeyQuotaExhausted bool
 	NewBalance           *float64           // post-deduction balance (nil = no balance deduction)
@@ -172,6 +182,7 @@ type UsageBillingApplyResult struct {
 
 // BatchImageBalanceHoldCommand describes an idempotent balance hold operation.
 type BatchImageBalanceHoldCommand struct {
+	SharedFunding      *SharedFunding
 	RequestID          string
 	APIKeyID           int64
 	RequestFingerprint string
@@ -207,6 +218,9 @@ func buildBatchImageBalanceHoldFingerprint(c *BatchImageBalanceHoldCommand) stri
 	)
 	if payloadHash := strings.TrimSpace(c.RequestPayloadHash); payloadHash != "" {
 		raw += "|" + payloadHash
+	}
+	if c.SharedFunding != nil {
+		raw += fmt.Sprintf("|shared:%d", c.SharedFunding.GroupID)
 	}
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])

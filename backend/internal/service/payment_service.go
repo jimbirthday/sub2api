@@ -71,20 +71,23 @@ func generateRandomString(n int) string {
 }
 
 type CreateOrderRequest struct {
-	UserID          int64
-	Amount          float64
-	PaymentType     string
-	OpenID          string
-	ClientIP        string
-	IsMobile        bool
-	IsWeChatBrowser bool
-	SrcHost         string
-	SrcURL          string
-	ReturnURL       string
-	PaymentSource   string
-	OrderType       string
-	PlanID          int64
-	Locale          string
+	RenewSharedSubscriptionID   int64
+	ReplaceSharedSubscriptionID int64
+	sharedPlan                  *SharedSubscriptionPlan
+	UserID                      int64
+	Amount                      float64
+	PaymentType                 string
+	OpenID                      string
+	ClientIP                    string
+	IsMobile                    bool
+	IsWeChatBrowser             bool
+	SrcHost                     string
+	SrcURL                      string
+	ReturnURL                   string
+	PaymentSource               string
+	OrderType                   string
+	PlanID                      int64
+	Locale                      string
 }
 
 type CreateOrderResponse struct {
@@ -185,6 +188,7 @@ type TopUsersByCurrency map[string][]TopUserStat
 // --- Service ---
 
 type PaymentService struct {
+	sharedSubscriptions      *SharedSubscriptionService
 	providerMu               sync.Mutex
 	providersLoaded          bool
 	entClient                *dbent.Client
