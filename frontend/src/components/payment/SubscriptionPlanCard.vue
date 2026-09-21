@@ -80,7 +80,15 @@
         </div>
       </div>
 
-      <p v-if="plan.shared" class="mb-3 text-xs text-gray-500 dark:text-dark-400">{{ Object.values(plan.group_names || {}).join(' · ') }}<br />{{ t('sharedSubscriptions.billingHint') }}</p>
+      <div v-if="plan.shared" class="mb-3 rounded-lg border border-gray-100 bg-gray-50/70 p-3 dark:border-dark-700 dark:bg-dark-700/30">
+        <p class="mb-2 text-xs font-medium text-gray-500 dark:text-dark-300">{{ t('sharedSubscriptions.coveredGroups') }}</p>
+        <SubscriptionGroupTags
+          :group-ids="plan.group_ids"
+          :group-names="plan.group_names"
+          :aria-label="t('sharedSubscriptions.coveredGroups')"
+        />
+        <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-dark-400">{{ t('sharedSubscriptions.purchaseBillingHint') }}</p>
+      </div>
       <!-- Features list (compact) -->
       <div v-if="plan.features.length > 0" class="mb-3 space-y-1">
         <div v-for="feature in plan.features" :key="feature" class="flex items-start gap-1.5">
@@ -114,6 +122,7 @@ import { useAppStore } from '@/stores/app'
 import { hasPeakRate as groupHasPeakRate, formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
 import { planValiditySuffix } from './validity'
 import { currencySymbol } from '@/components/payment/currency'
+import SubscriptionGroupTags from './SubscriptionGroupTags.vue'
 import {
   platformAccentBarClass,
   platformBadgeLightClass,

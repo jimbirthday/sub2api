@@ -121,7 +121,15 @@
                 <p v-if="selectedPlan.description" class="mt-2 text-sm leading-relaxed text-gray-500 dark:text-gray-400">
                   {{ selectedPlan.description }}
                 </p>
-                <p v-if="selectedPlan.shared" class="mt-3 text-sm text-gray-600 dark:text-gray-300">{{ Object.values(selectedPlan.group_names || {}).join(' · ') }}<br />{{ t('sharedSubscriptions.billingHint') }}<br />{{ t('sharedSubscriptions.stackingHint') }}</p>
+                <div v-if="selectedPlan.shared" class="mt-4 rounded-xl border border-gray-100 bg-gray-50/70 p-3 dark:border-dark-700 dark:bg-dark-700/30">
+                  <p class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">{{ t('sharedSubscriptions.coveredGroups') }}</p>
+                  <SubscriptionGroupTags
+                    :group-ids="selectedPlan.group_ids"
+                    :group-names="selectedPlan.group_names"
+                    :aria-label="t('sharedSubscriptions.coveredGroups')"
+                  />
+                  <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-dark-400">{{ t('sharedSubscriptions.purchaseBillingHint') }}</p>
+                </div>
                 <!-- Rate + Limits grid -->
                 <div class="mt-3 grid grid-cols-2 gap-3">
                   <div v-if="!selectedPlan.shared">
@@ -319,6 +327,7 @@ import {
 } from '@/components/payment/paymentFlow'
 import { platformAccentBarClass, platformBadgeLightClass, platformBadgeClass, platformTextClass, platformLabel } from '@/utils/platformColors'
 import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
+import SubscriptionGroupTags from '@/components/payment/SubscriptionGroupTags.vue'
 import PaymentStatusPanel from '@/components/payment/PaymentStatusPanel.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { DEFAULT_PAYMENT_CURRENCY, formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'

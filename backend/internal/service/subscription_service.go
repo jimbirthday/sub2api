@@ -790,6 +790,18 @@ func (s *SubscriptionService) ListUserSubscriptions(ctx context.Context, userID 
 	return subs, nil
 }
 
+// ListVisibleUserSubscriptions returns subscriptions suitable for the user-facing list.
+// The repository applies visibility rules in the database query so invalid records never reach the client.
+func (s *SubscriptionService) ListVisibleUserSubscriptions(ctx context.Context, userID int64) ([]UserSubscription, error) {
+	subs, err := s.userSubRepo.ListVisibleByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	normalizeExpiredWindows(subs)
+	normalizeSubscriptionStatus(subs)
+	return subs, nil
+}
+
 // ListActiveUserSubscriptions 获取用户的所有有效订阅
 func (s *SubscriptionService) ListActiveUserSubscriptions(ctx context.Context, userID int64) ([]UserSubscription, error) {
 	subs, err := s.userSubRepo.ListActiveByUserID(ctx, userID)

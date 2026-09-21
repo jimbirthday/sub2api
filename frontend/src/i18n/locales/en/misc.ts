@@ -121,6 +121,7 @@ export default {
     failedToLoad: 'Failed to load subscriptions',
     status: {
       active: 'Active',
+      suspended: 'Paused',
       expired: 'Expired',
       revoked: 'Revoked'
     },

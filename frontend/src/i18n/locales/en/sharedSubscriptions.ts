@@ -31,6 +31,8 @@ export default {
     "purchaseOrderHint": "Subscriptions are consumed in purchase order. Charges beyond plan credit use wallet balance normally.",
     "title": "Shared subscriptions",
     "billingHint": "Choose the API key group manually. Its effective prices and multipliers determine cost. Covered requests use shared subscription credit first, then wallet balance. Other groups retain their existing billing rules.",
+    "coveredGroups": "Included groups",
+    "purchaseBillingHint": "Included groups use subscription credit first, then wallet balance.",
     "newPlan": "Create plan",
     "offSale": "Off sale",
     "days": "days",

@@ -260,6 +260,37 @@ func (s *UserSubscriptionRepoSuite) TestListByUserID() {
 	}
 }
 
+func (s *UserSubscriptionRepoSuite) TestListVisibleByUserIDFiltersInvalidSubscriptionsInQuery() {
+	user := s.mustCreateUser("list-visible@test.com", service.RoleUser)
+	activeGroup := s.mustCreateGroup("g-visible-active")
+	pausedGroup := s.mustCreateGroup("g-visible-paused")
+	expiredStatusGroup := s.mustCreateGroup("g-visible-expired-status")
+	pastDueGroup := s.mustCreateGroup("g-visible-past-due")
+	revokedGroup := s.mustCreateGroup("g-visible-revoked")
+
+	active := s.mustCreateSubscription(user.ID, activeGroup.ID, nil)
+	paused := s.mustCreateSubscription(user.ID, pausedGroup.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStatus(service.SubscriptionStatusSuspended)
+	})
+	s.mustCreateSubscription(user.ID, expiredStatusGroup.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStatus(service.SubscriptionStatusExpired)
+	})
+	s.mustCreateSubscription(user.ID, pastDueGroup.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetExpiresAt(time.Now().Add(-time.Hour))
+	})
+	s.mustCreateSubscription(user.ID, revokedGroup.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStatus(service.SubscriptionStatusRevoked)
+	})
+
+	subs, err := s.repo.ListVisibleByUserID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().Len(subs, 2)
+	s.Require().ElementsMatch([]int64{active.ID, paused.ID}, []int64{subs[0].ID, subs[1].ID})
+	for _, sub := range subs {
+		s.Require().NotNil(sub.Group, "expected Group preload")
+	}
+}
+
 func (s *UserSubscriptionRepoSuite) TestListActiveByUserID() {
 	user := s.mustCreateUser("listactive@test.com", service.RoleUser)
 	g1 := s.mustCreateGroup("g-act1")

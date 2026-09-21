@@ -31,6 +31,8 @@ export default {
     "purchaseOrderHint": "多份订阅按购买先后顺序使用；套餐额度不足时，剩余费用正常从余额扣除。",
     "title": "共享订阅",
     "billingHint": "手动选择 API Key 分组，费用按该分组的实际计价和倍率计算。套餐覆盖的分组优先扣共享订阅额度，不足部分扣余额；未覆盖的分组沿用原计费方式。",
+    "coveredGroups": "覆盖分组",
+    "purchaseBillingHint": "覆盖分组优先使用订阅额度，不足部分扣余额。",
     "newPlan": "创建套餐",
     "offSale": "已下架",
     "days": "天",

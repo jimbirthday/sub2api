@@ -195,6 +195,26 @@ func (r *userSubscriptionRepository) ListByUserID(ctx context.Context, userID in
 	return userSubscriptionEntitiesToService(subs), nil
 }
 
+// ListVisibleByUserID returns subscriptions shown on the user-facing "My subscriptions" page.
+// Paused subscriptions remain visible, while revoked and expired subscriptions are filtered in SQL.
+func (r *userSubscriptionRepository) ListVisibleByUserID(ctx context.Context, userID int64) ([]service.UserSubscription, error) {
+	client := clientFromContext(ctx, r.client)
+	subs, err := client.UserSubscription.Query().
+		Where(
+			usersubscription.UserIDEQ(userID),
+			usersubscription.StatusNEQ(service.SubscriptionStatusRevoked),
+			usersubscription.StatusNEQ(service.SubscriptionStatusExpired),
+			usersubscription.ExpiresAtGT(time.Now()),
+		).
+		WithGroup().
+		Order(dbent.Desc(usersubscription.FieldCreatedAt)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return userSubscriptionEntitiesToService(subs), nil
+}
+
 func (r *userSubscriptionRepository) ListActiveByUserID(ctx context.Context, userID int64) ([]service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
 	subs, err := client.UserSubscription.Query().

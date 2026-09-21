@@ -363,8 +363,8 @@ async function loadSubscriptions() {
       sharedSubscriptionsAPI.subscriptions(),
       sharedSubscriptionsAPI.history()
     ])
-    subscriptions.value = legacy.filter(subscription => isSubscriptionVisible(subscription.status, subscription.expires_at))
-    sharedSubscriptions.value = shared.filter(subscription => isSubscriptionVisible(subscription.status, subscription.expires_at))
+    subscriptions.value = legacy
+    sharedSubscriptions.value = shared
     sharedHistory.value = history
   } catch (error) {
     console.error('Failed to load subscriptions:', error)
@@ -376,13 +376,6 @@ async function loadSubscriptions() {
   if (route.hash === '#shared-subscriptions' && sharedSubscriptions.value.length) {
     document.getElementById('shared-subscriptions')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
   }
-}
-
-function isSubscriptionVisible(status: string, expiresAt?: string | null): boolean {
-  if (status === 'expired' || status === 'revoked') return false
-  if (!expiresAt) return true
-  const expiresAtMs = Date.parse(expiresAt)
-  return !Number.isFinite(expiresAtMs) || expiresAtMs > Date.now()
 }
 
 function money(value: number): string {

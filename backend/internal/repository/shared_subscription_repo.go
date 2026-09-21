@@ -206,7 +206,7 @@ func (r *sharedSubscriptionRepository) List(ctx context.Context, userID int64, l
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	rows, err := r.db.QueryContext(ctx, "SELECT "+sharedSubColumns+" FROM shared_subscriptions WHERE ($1::bigint=0 OR user_id=$1) ORDER BY id DESC LIMIT $2", userID, limit)
+	rows, err := r.db.QueryContext(ctx, "SELECT "+sharedSubColumns+" FROM shared_subscriptions WHERE ($1::bigint=0 OR user_id=$1) AND status NOT IN ('revoked','expired') AND expires_at>NOW() ORDER BY id DESC LIMIT $2", userID, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -1718,6 +1718,10 @@ func (r *stubUserSubscriptionRepo) ListByUserID(ctx context.Context, userID int6
 	return nil, errors.New("not implemented")
 }
 
+func (r *stubUserSubscriptionRepo) ListVisibleByUserID(ctx context.Context, userID int64) ([]service.UserSubscription, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (r *stubUserSubscriptionRepo) ListActiveByUserID(ctx context.Context, userID int64) ([]service.UserSubscription, error) {
 	return nil, errors.New("not implemented")
 }

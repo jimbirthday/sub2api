@@ -119,6 +119,25 @@ func (f sharedFixture) funding(t *testing.T, group int64) *service.SharedFunding
 func (f sharedFixture) command(t *testing.T, cost float64) *service.UsageBillingCommand {
 	return &service.UsageBillingCommand{RequestID: uuid.NewString(), UserID: f.user.ID, APIKeyID: f.key.ID, SharedFunding: f.funding(t, f.group.ID), SharedCost: cost, APIKeyQuotaCost: cost, APIKeyRateLimitCost: cost}
 }
+
+func TestSharedSubscriptionListFiltersInvalidSubscriptionsInQuery(t *testing.T) {
+	f := newSharedFixture(t, 5)
+	ctx := context.Background()
+	paused, err := f.repo.Assign(ctx, f.user.ID, f.plan, uuid.NewString())
+	require.NoError(t, err)
+	revoked, err := f.repo.Assign(ctx, f.user.ID, f.plan, uuid.NewString())
+	require.NoError(t, err)
+	require.NoError(t, f.repo.Action(ctx, paused.ID, "pause", 0))
+	require.NoError(t, f.repo.Action(ctx, revoked.ID, "revoke", 0))
+	_, err = integrationDB.Exec("UPDATE shared_subscriptions SET expires_at=NOW()-interval '1 second' WHERE id=$1", f.sub.ID)
+	require.NoError(t, err)
+
+	visible, err := f.repo.List(ctx, f.user.ID, 20)
+	require.NoError(t, err)
+	require.Len(t, visible, 1)
+	require.Equal(t, paused.ID, visible[0].ID)
+	require.Equal(t, "paused", visible[0].Status)
+}
 func (f sharedFixture) balance(t *testing.T) float64 {
 	t.Helper()
 	var v float64

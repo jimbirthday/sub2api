@@ -118,6 +118,7 @@ export default {
     failedToLoad: '加载订阅失败',
     status: {
       active: '有效',
+      suspended: '已暂停',
       expired: '已过期',
       revoked: '已撤销'
     },

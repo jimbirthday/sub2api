@@ -377,7 +377,7 @@ describe('PaymentView shared catalog', () => {
     cards[1].vm.$emit('select', cards[1].props('plan'))
     await flushPromises()
     expect(wrapper.text()).toContain(plan.name)
-    expect(wrapper.text()).toContain('sharedSubscriptions.stackingHint')
+    expect(wrapper.text()).toContain('sharedSubscriptions.purchaseBillingHint')
     wrapper.unmount()
   })
   it('keeps legacy checkout usable when the shared catalog request fails', async () => {

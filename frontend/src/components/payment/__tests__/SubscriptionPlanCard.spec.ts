@@ -148,4 +148,19 @@ describe("SubscriptionPlanCard", () => {
     ]));
     expect(badge?.element.parentElement?.textContent).toContain("/ 30payment.days");
   });
+
+  it("renders shared plan groups as separate color tags with a concise billing hint", () => {
+    const wrapper = mountPlanCard("", {
+      shared: true,
+      group_ids: [3, 4, 5],
+      group_names: { 3: "OpenAI Pro", 4: "Claude Team", 5: "Gemini Fast" },
+    });
+    const tags = wrapper.findAll("ul > li > span");
+
+    expect(tags.map(tag => tag.text())).toEqual(["OpenAI Pro", "Claude Team", "Gemini Fast"]);
+    expect(tags.map(tag => tag.classes().find(name => name.startsWith("border-") && name !== "border")))
+      .toEqual(["border-teal-200", "border-sky-200", "border-violet-200"]);
+    expect(wrapper.text()).toContain("sharedSubscriptions.purchaseBillingHint");
+    expect(wrapper.text()).not.toContain("sharedSubscriptions.billingHint");
+  });
 });
