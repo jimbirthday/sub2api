@@ -379,7 +379,7 @@ async function loadSubscriptions() {
 }
 
 function isSubscriptionVisible(status: string, expiresAt?: string | null): boolean {
-  if (status === 'expired') return false
+  if (status === 'expired' || status === 'revoked') return false
   if (!expiresAt) return true
   const expiresAtMs = Date.parse(expiresAt)
   return !Number.isFinite(expiresAtMs) || expiresAtMs > Date.now()

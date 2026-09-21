@@ -66,16 +66,18 @@ describe('my subscriptions shared section', () => {
     expect(wrapper.find('[role="progressbar"]').exists()).toBe(true)
   })
 
-  it('does not render subscriptions that are expired by status or time', async () => {
+  it('does not render subscriptions that are expired, past due or revoked', async () => {
     mocks.legacy.mockResolvedValue([
       { id: 21, status: 'expired', expires_at: '2099-10-01T00:00:00Z', group_id: 1, group: { name: 'Expired legacy' } },
       { id: 22, status: 'active', expires_at: '2020-10-01T00:00:00Z', group_id: 2, group: { name: 'Past legacy' } },
+      { id: 23, status: 'revoked', expires_at: '2099-10-01T00:00:00Z', group_id: 3, group: { name: 'Revoked legacy' } },
     ])
     const active = await mocks.shared()
     mocks.shared.mockResolvedValue([
       ...active,
       { ...active[0], id: 12, status: 'expired', plan: { name: 'Expired shared' } },
       { ...active[0], id: 13, expires_at: '2020-10-01T00:00:00Z', plan: { name: 'Past shared' } },
+      { ...active[0], id: 14, status: 'revoked', plan: { name: 'Revoked shared' } },
     ])
 
     const wrapper = mountView()
@@ -86,6 +88,8 @@ describe('my subscriptions shared section', () => {
     expect(wrapper.text()).not.toContain('Past shared')
     expect(wrapper.text()).not.toContain('Expired legacy')
     expect(wrapper.text()).not.toContain('Past legacy')
+    expect(wrapper.text()).not.toContain('Revoked shared')
+    expect(wrapper.text()).not.toContain('Revoked legacy')
   })
 
   it('opens renewal from the existing My Subscriptions page', async () => {

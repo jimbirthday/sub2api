@@ -28,7 +28,7 @@ export default {
     "oneDay": "1 day",
     "daysShort": "{days}d",
     "stackingHint": "Different plans can coexist. Choose new, renew, or replace before checkout. Multiple subscriptions are consumed in purchase order; excess usage is charged to wallet balance.",
-    "purchaseOrderHint": "Shared subscriptions are consumed in purchase order. Charges beyond plan credit use wallet balance normally.",
+    "purchaseOrderHint": "Subscriptions are consumed in purchase order. Charges beyond plan credit use wallet balance normally.",
     "title": "Shared subscriptions",
     "billingHint": "Choose the API key group manually. Its effective prices and multipliers determine cost. Covered requests use shared subscription credit first, then wallet balance. Other groups retain their existing billing rules.",
     "newPlan": "Create plan",
