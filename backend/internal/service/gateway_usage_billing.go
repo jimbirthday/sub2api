@@ -515,9 +515,20 @@ func syncBalanceCacheAfterDeduction(ctx context.Context, p *postUsageBillingPara
 	if p.APIKey != nil && p.APIKey.SharedFunding != nil && result != nil {
 		amount = result.WalletConsumed
 	}
-	if amount > 0 {
-		deps.billingCacheService.QueueDeductBalance(p.User.ID, amount)
+	if amount <= 0 {
+		return
 	}
+	if deps.billingCacheService.InflightReservationEnabled() {
+		// 在途预留开启时同步扣减余额缓存：计费任务结束后才会释放预留，
+		// 必须保证此时准入读取的缓存余额已反映本次扣费，否则释放与扣减之间
+		// 仍存在「在途=0 且余额未扣」的窗口。本函数运行在计费 worker 中，不在请求热路径。
+		err := deps.billingCacheService.DeductBalanceCache(ctx, p.User.ID, amount)
+		if err == nil {
+			return
+		}
+		logger.LegacyPrintf("service.gateway", "Warning: sync deduct balance cache failed for user %d, falling back to queue: %v", p.User.ID, err)
+	}
+	deps.billingCacheService.QueueDeductBalance(p.User.ID, amount)
 }
 
 // notifyBalanceLow sends balance low notification after deduction.
