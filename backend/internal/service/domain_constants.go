@@ -453,8 +453,9 @@ const (
 	SettingKeyFallbackModelAntigravity = "fallback_model_antigravity"
 
 	// Request identity patch (Claude -> Gemini systemInstruction injection)
-	SettingKeyEnableIdentityPatch = "enable_identity_patch"
-	SettingKeyIdentityPatchPrompt = "identity_patch_prompt"
+	SettingKeyEnableIdentityPatch  = "enable_identity_patch"
+	SettingKeyIdentityPatchPrompt  = "identity_patch_prompt"
+	SettingKeyPromptInjectionRules = "prompt_injection_rules"
 
 	// =========================
 	// Ops Monitoring (vNext)

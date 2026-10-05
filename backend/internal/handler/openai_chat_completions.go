@@ -110,6 +110,16 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}
+	if h.promptInjectionService != nil {
+		injected, changed, injectErr := h.promptInjectionService.Apply(c.Request.Context(), reqModel, apiKey.GroupID, "chat_completions", body)
+		if injectErr != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", injectErr.Error())
+			return
+		}
+		if changed {
+			body = injected
+		}
+	}
 	if h.rejectIfCyberSessionBlocked(c, apiKey, body, reqModel, cyberBlockFormatChat) {
 		return
 	}

@@ -493,6 +493,17 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/prompt-injection',
+    name: 'AdminPromptInjection',
+    component: () => import('@/views/admin/PromptInjectionView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Prompt Injection',
+      titleKey: 'admin.promptInjection.title'
+    }
+  },
+  {
     path: '/admin/channels',
     redirect: '/admin/channels/pricing'
   },

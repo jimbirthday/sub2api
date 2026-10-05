@@ -89,6 +89,13 @@ func RegisterAdminRoutes(
 		// 系统设置
 		registerSettingsRoutes(admin, h)
 
+		// 提示词注入规则（数据库配置，作用于网关请求）
+		if h.Admin.Setting != nil {
+			promptInjection := admin.Group("/prompt-injection")
+			promptInjection.GET("/rules", h.Admin.Setting.GetPromptInjectionRules)
+			promptInjection.PUT("/rules", h.Admin.Setting.SavePromptInjectionRules)
+		}
+
 		// 数据管理
 		registerDataManagementRoutes(admin, h, stepUpAuth)
 

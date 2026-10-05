@@ -58,6 +58,7 @@ type GatewayHandler struct {
 	maxAccountSwitchesGemini  int
 	cfg                       *config.Config
 	settingService            *service.SettingService
+	promptInjectionService    *service.PromptInjectionService
 }
 
 // NewGatewayHandler creates a new GatewayHandler
@@ -115,6 +116,7 @@ func NewGatewayHandler(
 		maxAccountSwitchesGemini:  maxAccountSwitchesGemini,
 		cfg:                       cfg,
 		settingService:            settingService,
+		promptInjectionService:    service.NewPromptInjectionService(settingService),
 	}
 }
 
@@ -230,6 +232,19 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.anthropicSecurityAuditError(c, decision)
 		return
+	}
+	if h.promptInjectionService != nil {
+		injected, changed, injectErr := h.promptInjectionService.Apply(c.Request.Context(), reqModel, apiKey.GroupID, "messages", body)
+		if injectErr != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", injectErr.Error())
+			return
+		}
+		if changed {
+			body = injected
+			if err := parsedReq.ReplaceBody(body); err == nil {
+				reqStream = parsedReq.Stream
+			}
+		}
 	}
 
 	// Track if we've started streaming (for error handling)

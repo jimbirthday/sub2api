@@ -1931,6 +1931,7 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 
 type openAIResponsesWSUsageLogCase struct {
 	simpleModeRejectAtRead int64
+	afterFirstClientTurn   func(*wsAuthoritativeKeyRepo)
 	compositeResolver      *service.CompositeRouteResolver
 	accountPlatform        string
 	closeReason            string
@@ -2615,6 +2616,7 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 		User:    &service.User{ID: 1702, Status: service.StatusActive},
 		Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive},
 	}
+	configureWSAuthoritativeKey(h, apiKey, cfg)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
@@ -2802,6 +2804,7 @@ func TestOpenAIResponsesWebSocket_FirstOutputTimeoutWithoutDownstreamReusesClien
 		Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive},
 	}
 	handlerDone := make(chan struct{})
+	configureWSAuthoritativeKey(h, apiKey, cfg)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
@@ -3006,7 +3009,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	gatewaySvc := service.NewOpenAIGatewayService(
 		accountRepo,
 		usageRepo,
-		nil,
+		&wsUsageBillingRepo{},
 		nil,
 		nil,
 		nil,
@@ -3056,6 +3059,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	if tc.group != nil {
 		apiKey.Group = tc.group
 	}
+	authorityRepo := configureWSAuthoritativeKey(h, apiKey, cfg)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
@@ -3125,6 +3129,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		clientEvents = append(clientEvents, append([]byte(nil), event...))
 	}
 	readCompleted()
+	if tc.afterFirstClientTurn != nil {
+		tc.afterFirstClientTurn(authorityRepo)
+	}
 	if tc.midPayload != "" {
 		writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
 		err = clientConn.Write(writeCtx, coderws.MessageText, []byte(tc.midPayload))
@@ -3299,7 +3306,7 @@ func TestOpenAIResponsesWebSocketSimpleModeRechecksKeyWindows(t *testing.T) {
 			runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
 				firstPayload:  `{"type":"response.create","model":"gpt-5.1"}`,
 				secondPayload: `{"type":"response.create","model":"gpt-5.1"}`,
-				ingressMode:   mode, simpleModeRejectAtRead: 3, secondTurnCloseExpected: true, closeReason: "billing check failed",
+				ingressMode:   mode, simpleModeRejectAtRead: map[string]int64{service.OpenAIWSIngressModePassthrough: 3, service.OpenAIWSIngressModeCtxPool: 4}[mode], secondTurnCloseExpected: true, closeReason: "billing check failed",
 			})
 		})
 	}

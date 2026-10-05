@@ -146,6 +146,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 			apikey.FieldRateLimit7d,
 		).
 		WithUser(func(q *dbent.UserQuery) {
+			q.Where(user.DeletedAtIsNil())
 			q.Select(
 				user.FieldID,
 				user.FieldEmail,
@@ -170,6 +171,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 			})
 		}).
 		WithGroup(func(q *dbent.GroupQuery) {
+			q.Where(group.DeletedAtIsNil())
 			q.Select(
 				group.FieldID,
 				group.FieldName,

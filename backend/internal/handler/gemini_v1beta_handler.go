@@ -348,6 +348,16 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		googleSecurityAuditError(c, decision)
 		return
 	}
+	if h.promptInjectionService != nil {
+		injected, changed, injectErr := h.promptInjectionService.Apply(c.Request.Context(), modelName, apiKey.GroupID, "gemini", body)
+		if injectErr != nil {
+			googleError(c, http.StatusBadRequest, injectErr.Error())
+			return
+		}
+		if changed {
+			body = injected
+		}
+	}
 
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, modelName)
