@@ -317,8 +317,8 @@ func TestForwardGrokVideoStatusRewritesOnlyProtectedContentURL(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, recorder.Code)
-	require.Equal(t, "/v1/videos/task-1/content", gjson.Get(recorder.Body.String(), "url").String())
-	require.Equal(t, "/v1/videos/task-1/content", gjson.Get(recorder.Body.String(), "download_url").String())
+	require.Equal(t, "https://api.example/v1/videos/task-1/content", gjson.Get(recorder.Body.String(), "url").String())
+	require.Equal(t, "https://api.example/v1/videos/task-1/content", gjson.Get(recorder.Body.String(), "download_url").String())
 	require.Equal(t, "https://vidgen.x.ai/task-1.mp4", gjson.Get(recorder.Body.String(), "video_url").String())
 	require.Equal(t, "9007199254740993", gjson.Get(recorder.Body.String(), "counter").String())
 	require.NotContains(t, recorder.Body.String(), "malicious.invalid")
@@ -336,9 +336,43 @@ func TestRewriteGrokMediaVideoContentURLsPreservesOtherIDsAndHandlesNestedEscape
 func TestRewriteGrokMediaVideoContentURLsRewritesSignedVideoURL(t *testing.T) {
 	body := []byte(`{"status":"done","video":{"url":"https://vidgen.x.ai/signed-token/xai-video-request-1.mp4","duration":8}}`)
 
-	rewritten := rewriteGrokMediaVideoContentURLs(body, "request-1", "/v1/videos/request-1/content")
+	rewritten := rewriteGrokMediaVideoContentURLs(body, "request-1", "https://api.example/v1/videos/request-1/content")
 
-	require.Equal(t, "/v1/videos/request-1/content", gjson.GetBytes(rewritten, "video.url").String())
+	require.Equal(t, "https://api.example/v1/videos/request-1/content", gjson.GetBytes(rewritten, "video.url").String())
 	require.Equal(t, "8", gjson.GetBytes(rewritten, "video.duration").String())
 	require.Equal(t, "done", gjson.GetBytes(rewritten, "status").String())
+}
+
+func TestGrokMediaContentProxyURLIsAbsoluteForCLIDownload(t *testing.T) {
+	c, _ := grokMediaContentTestContext(http.MethodGet, "https://mgoole.com/v1/videos/req-1", nil)
+
+	got := grokMediaContentProxyURL(c, "req-1")
+
+	require.Equal(t, "https://mgoole.com/v1/videos/req-1/content", got)
+}
+
+func TestGrokMediaContentProxyURLUsesForwardedProtoBehindProxy(t *testing.T) {
+	c, _ := grokMediaContentTestContext(http.MethodGet, "http://mgoole.com/v1/videos/req-1", map[string]string{
+		"X-Forwarded-Proto": "https",
+		"X-Forwarded-Host":  "malicious.invalid",
+	})
+	c.Request.URL.Scheme = ""
+
+	got := grokMediaContentProxyURL(c, "req-1")
+
+	require.Equal(t, "https://mgoole.com/v1/videos/req-1/content", got)
+	require.NotContains(t, got, "malicious.invalid")
+}
+
+func TestGrokMediaContentProxyURLStaysRelativeWithoutPublicHost(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/videos/req-1", nil)
+	c.Request.Host = ""
+	c.Request.URL.Host = ""
+
+	got := grokMediaContentProxyURL(c, "req-1")
+
+	require.Equal(t, "/v1/videos/req-1/content", got)
 }

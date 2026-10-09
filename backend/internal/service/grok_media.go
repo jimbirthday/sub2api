@@ -1536,5 +1536,49 @@ func grokMediaContentProxyURL(c *gin.Context, requestID string) string {
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/") {
 		pathPrefix = "/v1"
 	}
-	return pathPrefix + "/videos/" + url.PathEscape(strings.Trim(requestID, "/")) + "/content"
+	path := pathPrefix + "/videos/" + url.PathEscape(strings.Trim(requestID, "/")) + "/content"
+	// Grok CLI polls video.url and downloads it only when the value is an
+	// absolute http(s) URL. A root-relative path makes generation look
+	// successful upstream and then fail with "no download URL".
+	return absoluteGrokMediaProxyURL(c.Request, path)
+}
+
+func absoluteGrokMediaProxyURL(req *http.Request, path string) string {
+	if req == nil || req.URL == nil {
+		return path
+	}
+	scheme := grokMediaRequestScheme(req)
+	host := strings.TrimSpace(req.Host)
+	if host == "" {
+		host = strings.TrimSpace(req.URL.Host)
+	}
+	if scheme != "http" && scheme != "https" || host == "" || strings.ContainsAny(host, " /\\") {
+		return path
+	}
+	return scheme + "://" + host + path
+}
+
+func grokMediaRequestScheme(req *http.Request) string {
+	if req == nil || req.URL == nil {
+		return ""
+	}
+	scheme := strings.ToLower(strings.TrimSpace(req.URL.Scheme))
+	if scheme == "http" || scheme == "https" {
+		return scheme
+	}
+	// Cloudflare and other TLS-terminating proxies leave URL.Scheme empty and
+	// pass the original scheme in X-Forwarded-Proto. Host still comes only
+	// from the request, so a forged forwarded host cannot redirect the URL.
+	if req.Header != nil {
+		for _, part := range strings.Split(req.Header.Get("X-Forwarded-Proto"), ",") {
+			forwarded := strings.ToLower(strings.TrimSpace(part))
+			if forwarded == "https" || forwarded == "http" {
+				return forwarded
+			}
+		}
+	}
+	if req.TLS != nil {
+		return "https"
+	}
+	return ""
 }
