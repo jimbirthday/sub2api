@@ -9,6 +9,7 @@ import (
 func wsAllowlistGroup(enabled bool, models ...string) *service.Group {
 	return &service.Group{
 		ID:       4201,
+		Status:   service.StatusActive,
 		Platform: service.PlatformOpenAI,
 		ModelAllowlist: service.GroupModelAllowlist{
 			Enabled: enabled,

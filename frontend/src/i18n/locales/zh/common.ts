@@ -1,5 +1,6 @@
 export default {
   common: {
+    pagination: '分页',
     loading: '加载中...',
     submitting: '提交中...',
     justNow: '刚刚',
@@ -210,6 +211,8 @@ export default {
     channelMonitor: '渠道监控',
     channelStatus: '渠道状态',
     riskControl: '风控中心',
+    modelBans: '模型禁用',
+    distillationRisk: '蒸馏风控',
     securityAudit: '安全审计',
     contentModeration: '内容审计',
     promptAudit: '提示词审计',

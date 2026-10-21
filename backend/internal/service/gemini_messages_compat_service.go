@@ -550,6 +550,11 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mappedModel = account.GetMappedModel(req.Model)
 	}
+	ctx = WithModelIdentityContext(ctx, "gemini", "", "")
+	if err := EnforceUserModelRestriction(ctx, account, mappedModel); err != nil {
+		WriteUserModelRestrictionError(c, UserModelRestrictionProtocolAnthropic, err)
+		return nil, err
+	}
 
 	geminiReq, err := convertClaudeMessagesToGeminiGenerateContent(body)
 	if err != nil {
@@ -716,6 +721,11 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	signatureRetryStage := 0
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
 		checkedPolicy = nil
+		ctx = WithModelIdentityContext(ctx, "gemini", "", "")
+		if err := EnforceUserModelRestriction(ctx, account, mappedModel); err != nil {
+			WriteUserModelRestrictionError(c, UserModelRestrictionProtocolAnthropic, err)
+			return nil, err
+		}
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -1120,6 +1130,11 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mappedModel = account.GetMappedModel(originalModel)
 	}
+	ctx = WithModelIdentityContext(ctx, "gemini", "", "")
+	if err := EnforceUserModelRestriction(ctx, account, mappedModel); err != nil {
+		WriteUserModelRestrictionError(c, UserModelRestrictionProtocolGoogle, err)
+		return nil, err
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -1264,6 +1279,11 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	var checkedPolicy *ErrorPolicyResult
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
 		checkedPolicy = nil
+		ctx = WithModelIdentityContext(ctx, "gemini", "", "")
+		if err := EnforceUserModelRestriction(ctx, account, mappedModel); err != nil {
+			WriteUserModelRestrictionError(c, UserModelRestrictionProtocolGoogle, err)
+			return nil, err
+		}
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

@@ -236,6 +236,9 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	if err != nil {
 		return nil, err
 	}
+	if err := EnforceUserModelRestrictionWithoutBudget(ctx, account, normalized.Model); err != nil {
+		return nil, err
+	}
 	pricingSnapshot, err := s.resolvePricingSnapshot(ctx, owner, normalized, provider.Name(), account)
 	if err != nil {
 		return nil, err
@@ -328,6 +331,21 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 			Prompt:          item.Prompt,
 			ReferenceImages: refs,
 		})
+	}
+	BindModelExecutionHold(ctx, holdID)
+	if err := SetModelExecutionBatchOutstanding(ctx, len(normalized.Items), 0); err != nil {
+		return nil, err
+	}
+	// Re-check immediately before the irreversible provider submit. An admin may
+	// have changed the policy while uploads, pricing and balance holds were being
+	// prepared.
+	if err := EnforceUserModelRestriction(ctx, account, normalized.Model); err != nil {
+		if releaseErr := s.releaseFailedSubmitHold(ctx, job, requestHash); releaseErr != nil {
+			return nil, releaseErr
+		}
+		_ = s.Repo.RecordBatchImageJobSubmitFailure(ctx, job.BatchID, "MODEL_ACCESS_DENIED", "model access policy rejected provider submission", true)
+		s.hidePreUpstreamSubmitFailure(ctx, owner, job)
+		return nil, err
 	}
 
 	// 上游提交（上传参考图 + 创建批任务）可能长达数分钟且不刷新 updated_at，

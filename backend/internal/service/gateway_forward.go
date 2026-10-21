@@ -110,6 +110,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			return nil, err
 		}
 	}
+	ctx = WithModelIdentityContext(ctx, "messages", "", "")
+	if err := EnforceUserModelRestrictionWithoutBudget(ctx, account, validationModel); err != nil {
+		WriteUserModelRestrictionError(c, UserModelRestrictionProtocolAnthropic, err)
+		return nil, err
+	}
 	// Anthropic Fast is requested with speed=fast rather than OpenAI's
 	// service_tier. Attach it at this shared boundary so passthrough, OAuth and
 	// partial-stream results all use the same billing and usage-log path.
@@ -321,6 +326,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		parsed.Model = mappedModel
 		logger.LegacyPrintf("service.gateway", "Model mapping applied: %s -> %s (account: %s, source=%s)", originalModel, mappedModel, account.Name, mappingSource)
 	}
+	UpdateModelExecutionPayload(ctx, body)
+	ctx = WithModelIdentityContext(ctx, "messages", "", "")
+	if err := EnforceUserModelRestrictionWithoutBudget(ctx, account, UserModelRestrictionModelsFromPayload(reqModel, body)...); err != nil {
+		WriteUserModelRestrictionError(c, UserModelRestrictionProtocolAnthropic, err)
+		return nil, err
+	}
 
 	if s.shouldInjectAnthropicCacheTTL1h(ctx, account) {
 		if err := replaceBody(injectAnthropicCacheControlTTL1h(body)); err != nil {
@@ -388,6 +399,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	lastWireBody := body
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+		UpdateModelExecutionPayload(ctx, body)
+		ctx = WithModelIdentityContext(ctx, "messages", "", "")
+		if err := EnforceUserModelRestrictionWithoutBudget(ctx, account, UserModelRestrictionModelsFromPayload(reqModel, body)...); err != nil {
+			WriteUserModelRestrictionError(c, UserModelRestrictionProtocolAnthropic, err)
+			return nil, err
+		}
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 		upstreamReq, wireBody, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
@@ -398,6 +415,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		// 记录本次实际发送的 wire body；只有请求成功后才写回 ParsedRequest，避免 400 retry 基于已签名 CCH 再改写。
 		lastWireBody = wireBody
 
+		// The signed/normalized wire body is the actual authorization payload.
+		UpdateModelExecutionPayload(ctx, wireBody)
+		if policyErr := EnforceUserModelRestriction(ctx, account, UserModelRestrictionModelsFromPayload(reqModel, wireBody)...); policyErr != nil {
+			WriteUserModelRestrictionError(c, UserModelRestrictionProtocolAnthropic, policyErr)
+			return nil, policyErr
+		}
 		// 发送请求
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 		if err != nil {
@@ -458,6 +481,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					//    also downgrade tool_use/tool_result blocks to text.
 
 					filteredBody := FilterThinkingBlocksForRetry(body, reqModel)
+					UpdateModelExecutionPayload(ctx, filteredBody)
+					ctx = WithModelIdentityContext(ctx, "messages", "", "")
+					if err := EnforceUserModelRestriction(ctx, account, UserModelRestrictionModelsFromPayload(reqModel, filteredBody)...); err != nil {
+						WriteUserModelRestrictionError(c, UserModelRestrictionProtocolAnthropic, err)
+						return nil, err
+					}
 					retryCtx, releaseRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
 					retryReq, retryWireBody, buildErr := s.buildUpstreamRequest(retryCtx, c, account, filteredBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 					releaseRetryCtx()
@@ -501,6 +530,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 								if looksLikeToolSignatureError(msg2) && time.Since(retryStart) < maxRetryElapsed {
 									logger.LegacyPrintf("service.gateway", "Account %d: signature retry still failing and looks tool-related, retrying with tool blocks downgraded", account.ID)
 									filteredBody2 := FilterSignatureSensitiveBlocksForRetry(body, reqModel)
+									UpdateModelExecutionPayload(ctx, filteredBody2)
+									ctx = WithModelIdentityContext(ctx, "messages", "", "")
+									if err := EnforceUserModelRestriction(ctx, account, UserModelRestrictionModelsFromPayload(reqModel, filteredBody2)...); err != nil {
+										WriteUserModelRestrictionError(c, UserModelRestrictionProtocolAnthropic, err)
+										return nil, err
+									}
 									retryCtx2, releaseRetryCtx2 := detachStreamUpstreamContext(ctx, reqStream)
 									retryReq2, retryWireBody2, buildErr2 := s.buildUpstreamRequest(retryCtx2, c, account, filteredBody2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 									releaseRetryCtx2()
@@ -583,6 +618,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 					rectifiedBody, applied := RectifyThinkingBudget(body)
 					if applied && time.Since(retryStart) < maxRetryElapsed {
+						UpdateModelExecutionPayload(ctx, rectifiedBody)
+						ctx = WithModelIdentityContext(ctx, "messages", "", "")
+						if err := EnforceUserModelRestriction(ctx, account, UserModelRestrictionModelsFromPayload(reqModel, rectifiedBody)...); err != nil {
+							WriteUserModelRestrictionError(c, UserModelRestrictionProtocolAnthropic, err)
+							return nil, err
+						}
 						logger.LegacyPrintf("service.gateway", "Account %d: detected budget_tokens constraint error, retrying with rectified budget (budget_tokens=%d, max_tokens=%d)", account.ID, BudgetRectifyBudgetTokens, BudgetRectifyMaxTokens)
 						budgetRetryCtx, releaseBudgetRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
 						budgetRetryReq, budgetWireBody, buildErr := s.buildUpstreamRequest(budgetRetryCtx, c, account, rectifiedBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)

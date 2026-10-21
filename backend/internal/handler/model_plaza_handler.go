@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -21,6 +23,13 @@ type ModelPlazaHandler struct {
 	plazaService   *service.ModelPlazaService
 	apiKeyService  *service.APIKeyService
 	settingService *service.SettingService
+	modelPolicies  *service.UserModelRestrictionService
+}
+
+func ProvideModelPlazaHandler(plazaService *service.ModelPlazaService, apiKeyService *service.APIKeyService, settingService *service.SettingService, policies *service.UserModelRestrictionService) *ModelPlazaHandler {
+	h := NewModelPlazaHandler(plazaService, apiKeyService, settingService)
+	h.modelPolicies = policies
+	return h
 }
 
 // NewModelPlazaHandler 创建模型广场 handler。
@@ -150,6 +159,13 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 	}
 
 	visible := filterPlazaVisibleGroups(groups, allowedGroups, restrictPublicGroups)
+	if authed && h.modelPolicies != nil {
+		visible, err = filterPlazaModelsByUser(c.Request.Context(), visible, h.modelPolicies, subject.UserID)
+		if err != nil {
+			response.Error(c, 503, "Model access policy is temporarily unavailable")
+			return
+		}
+	}
 
 	// 广场可匿名访问，分组文案随请求语言变化，提示中间缓存按语言区分。
 	// 追加而非覆盖：CORS 中间件已为具体来源写入 Vary: Origin。
@@ -159,6 +175,37 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 		Description: rt.Description,
 		Groups:      out,
 	})
+}
+
+func filterPlazaModelsByUser(ctx context.Context, groups []service.PlazaGroup, policies *service.UserModelRestrictionService, userID int64) ([]service.PlazaGroup, error) {
+	inputs := make([]service.ModelIdentityInput, 0)
+	for i := range groups {
+		for j := range groups[i].Models {
+			inputs = append(inputs, service.ModelIdentityInput{Transport: groups[i].Models[j].Platform, Model: groups[i].Models[j].Name})
+		}
+	}
+	if len(inputs) == 0 {
+		return groups, nil
+	}
+	result, err := policies.FilterModelsForListing(ctx, userID, inputs)
+	if err != nil {
+		return nil, fmt.Errorf("evaluate model plaza policy: %w", err)
+	}
+	if result == nil || len(result.Allowed) != len(inputs) {
+		return nil, service.ErrUserModelRestrictionUnavailable
+	}
+	index := 0
+	for i := range groups {
+		kept := make([]service.PlazaModel, 0, len(groups[i].Models))
+		for _, model := range groups[i].Models {
+			if result.Allowed[index] {
+				kept = append(kept, model)
+			}
+			index++
+		}
+		groups[i].Models = kept
+	}
+	return groups, nil
 }
 
 // filterPlazaVisibleGroups 按登录态裁剪分组可见性。

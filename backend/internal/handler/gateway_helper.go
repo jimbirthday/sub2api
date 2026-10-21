@@ -281,6 +281,10 @@ func (h *ConcurrencyHelper) acquireUserSlotWithWaitTimeout(c *gin.Context, userI
 	}
 
 	if acquired {
+		observed, _ := h.concurrencyService.GetUserConcurrency(ctx, userID)
+		if telemetryCtx, telemetryErr := service.BeginPreparedDistillationAttempt(ctx, observed, time.Now().UTC()); telemetryErr == nil {
+			c.Request = c.Request.WithContext(telemetryCtx)
+		}
 		return h.withAPIKeySlotFromGin(c, releaseFunc), nil
 	}
 
@@ -301,6 +305,10 @@ func (h *ConcurrencyHelper) acquireUserSlotWithWaitTimeout(c *gin.Context, userI
 	releaseFunc, err = h.waitForSlotWithPingTimeout(c, "user", userID, maxConcurrency, timeout, isStream, streamStarted, false)
 	if err != nil {
 		return nil, err
+	}
+	observed, _ := h.concurrencyService.GetUserConcurrency(ctx, userID)
+	if telemetryCtx, telemetryErr := service.BeginPreparedDistillationAttempt(ctx, observed, time.Now().UTC()); telemetryErr == nil {
+		c.Request = c.Request.WithContext(telemetryCtx)
 	}
 	return h.withAPIKeySlotFromGin(c, releaseFunc), nil
 }

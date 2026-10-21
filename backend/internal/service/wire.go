@@ -463,8 +463,9 @@ func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWh
 }
 
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
-func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
+func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config, distillation *DistillationRiskService) *ConcurrencyService {
 	svc := NewConcurrencyService(cache)
+	svc.SetDistillationRiskService(distillation)
 	if err := svc.CleanupStaleProcessSlots(context.Background()); err != nil {
 		logger.LegacyPrintf("service.concurrency", "Warning: startup cleanup stale process slots failed: %v", err)
 	}
@@ -834,8 +835,10 @@ func ProvideBillingCacheService(
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
 	shared *SharedSubscriptionService,
 	billingRepo UsageBillingRepository,
+	distillation *DistillationRiskService,
 ) *BillingCacheService {
 	svc := NewBillingCacheService(cache, userRepo, subRepo, apiKeyRepo, rpmCache, rateRepo, cfg, userPlatformQuotaRepo)
+	svc.SetDistillationRiskService(distillation)
 	svc.sharedSubscriptions = shared
 	svc.sharedRecoveryRepo = billingRepo
 	return svc
@@ -865,6 +868,8 @@ func ProvideAPIKeyService(
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
+	ProvideDistillationRiskService,
+	ProvideDistillationTelemetryService,
 	NewSharedSubscriptionService,
 	// Core services
 	ProvideAuthService,
@@ -915,6 +920,7 @@ var ProviderSet = wire.NewSet(
 	ProvideOpenAITokenProvider,
 	ProvideOpenAIQuotaService,
 	ProvideOpenAIQuotaAutoResetService,
+	NewUserModelRestrictionService,
 	ProvideGrokQuotaService,
 	ProvideCNProviderQuotaService,
 	ProvideCNProviderBalanceService,
@@ -1097,4 +1103,21 @@ func ProvideClaudeResetCreditService(accounts AccountRepository, tokens *ClaudeT
 	s := NewClaudeResetCreditService(accounts, tokens, proxies, settings)
 	s.ConfigureRedemption(idem, locks)
 	return s
+}
+
+// ProvideDistillationRiskService starts independent behavioral observation.
+func ProvideDistillationRiskService(repo DistillationRiskRepository) *DistillationRiskService {
+	svc := NewDistillationRiskService(repo)
+	svc.Start(time.Minute)
+	return svc
+}
+
+func ProvideDistillationTelemetryService(repo DistillationTelemetryRepository, cfg *config.Config) *DistillationTelemetryService {
+	secret := ""
+	if cfg != nil {
+		secret = cfg.JWT.Secret
+	}
+	svc := NewDistillationTelemetryService(repo, secret, 4096)
+	svc.Start(4)
+	return svc
 }

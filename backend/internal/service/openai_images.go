@@ -637,6 +637,10 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	if err := validateCompatibleImagesModel(upstreamModel); err != nil {
 		return nil, err
 	}
+	if err := EnforceUserModelRestriction(ctx, account, upstreamModel); err != nil {
+		WriteUserModelRestrictionError(c, UserModelRestrictionProtocolOpenAI, err)
+		return nil, err
+	}
 	SetOpsUpstreamModel(c, upstreamModel)
 	logger.LegacyPrintf(
 		"service.openai_gateway",

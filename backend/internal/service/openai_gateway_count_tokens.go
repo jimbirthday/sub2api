@@ -60,6 +60,9 @@ func (s *OpenAIGatewayService) ForwardResponsesInputTokens(
 		writeOpenAIResponsesInputTokensError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return err
 	}
+	if err := EnforceUserModelRestrictionWithoutBudget(ctx, account, prepared.UpstreamModel); err != nil {
+		return err
+	}
 
 	if shouldEstimateOpenAIInputTokensLocally(account) {
 		writeOpenAIResponsesInputTokensFallback(c, account, prepared, 0, "custom_relay")
@@ -262,6 +265,10 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 	if account == nil {
 		writeAnthropicCountTokensError(c, http.StatusServiceUnavailable, "api_error", "No available OpenAI accounts")
 		return fmt.Errorf("count_tokens: missing account")
+	}
+	requestedModel := gjson.GetBytes(body, "model").String()
+	if err := EnforceUserModelRestrictionWithoutBudget(ctx, account, requestedModel); err != nil {
+		return err
 	}
 
 	// 多协议 API Key 供应商（国产厂商与聚合平台，全部协议，含 anthropic）：一律本地估算，不发上游请求。

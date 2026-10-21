@@ -70,6 +70,19 @@ type OpenAIWSIngressLeaseCache interface {
 	ReleaseOpenAIWSIngressLease(ctx context.Context, apiKeyID int64, leaseID string) error
 }
 
+// ModelExecutionBudgetCache atomically owns one logical user operation and
+// its deduplicated canonical model targets. Implementations keep all keys for
+// a user in the same Redis hash slot.
+type ModelExecutionBudgetCache interface {
+	ReserveModelExecution(ctx context.Context, reservation ModelExecutionReservation) (*ModelExecutionLease, error)
+	ConfirmModelExecution(ctx context.Context, confirmation ModelExecutionConfirmation) (*ModelExecutionLease, error)
+	ExtendModelExecution(ctx context.Context, extension ModelExecutionExtension) (*ModelExecutionLease, error)
+	RetargetModelExecution(ctx context.Context, retarget ModelExecutionRetarget) (*ModelExecutionLease, error)
+	ReleaseModelExecution(ctx context.Context, userID int64, operationID string, expectedRevision, expectedEpoch int64) error
+	MarkModelExecutionUnknown(ctx context.Context, userID int64, operationID string, expectedRevision, expectedEpoch int64) error
+	AdvanceModelExecutionEpoch(ctx context.Context, userID int64) (int64, error)
+}
+
 const (
 	openAIWSIngressLeaseTTL             = 60 * time.Second
 	openAIWSIngressLeaseRefreshInterval = 20 * time.Second
@@ -229,12 +242,34 @@ const (
 
 // ConcurrencyService 管理账号和用户的并发限制。
 type ConcurrencyService struct {
-	cache ConcurrencyCache
+	cache            ConcurrencyCache
+	distillationRisk *DistillationRiskService
 
 	accountLoadCacheTTL atomic.Int64
 	accountLoadCacheMu  sync.RWMutex
 	accountLoadCache    map[string]cachedAccountLoadBatch
 	accountLoadGroup    singleflight.Group
+}
+
+func (s *ConcurrencyService) SetDistillationRiskService(risk *DistillationRiskService) {
+	if s != nil {
+		s.distillationRisk = risk
+	}
+}
+
+func (s *ConcurrencyService) ModelExecutionBudgetCache() ModelExecutionBudgetCache {
+	if s == nil || s.cache == nil {
+		return nil
+	}
+	cache, _ := s.cache.(ModelExecutionBudgetCache)
+	return cache
+}
+
+func (s *ConcurrencyService) GetUserConcurrency(ctx context.Context, userID int64) (int, error) {
+	if s == nil || s.cache == nil {
+		return 0, errors.New("concurrency cache unavailable")
+	}
+	return s.cache.GetUserConcurrency(ctx, userID)
 }
 
 type cachedAccountLoadBatch struct {
@@ -379,6 +414,14 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 // If the user is at max concurrency, it waits until a slot is available or timeout.
 // Returns a release function that MUST be called when the request completes.
 func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int) (*AcquireResult, error) {
+	if s != nil && s.distillationRisk != nil {
+		effective, _, err := s.distillationRisk.EffectiveLimits(ctx, userID, maxConcurrency, 0, time.Now().UTC())
+		if err != nil {
+			logger.LegacyPrintf("service.concurrency", "Warning: behavior restriction lookup failed for user %d: %v", userID, err)
+		} else {
+			maxConcurrency = effective
+		}
+	}
 	// If maxConcurrency is 0 or negative, no limit
 	if maxConcurrency <= 0 {
 		return &AcquireResult{

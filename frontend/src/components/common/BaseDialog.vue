@@ -11,7 +11,7 @@
         @click.self="handleClose"
       >
         <!-- Modal panel -->
-        <div ref="dialogRef" :class="['modal-content', widthClasses]" @click.stop>
+        <div ref="dialogRef" tabindex="-1" :class="['modal-content', widthClasses]" @click.stop>
           <!-- Header -->
           <div class="modal-header">
             <h3 :id="dialogId" class="modal-title">
@@ -111,6 +111,16 @@ const handleClose = () => {
 }
 
 const handleEscape = (event: KeyboardEvent) => {
+  if (!props.show || [...openDialogs].pop() !== dialogId) return
+  if (event.key === 'Tab' && dialogRef.value) {
+    const focusable = [...dialogRef.value.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )].filter(element => element.getAttribute('aria-hidden') !== 'true' && !element.closest('[hidden]'))
+    const first = focusable[0], last = focusable[focusable.length - 1]
+    if (!first) { event.preventDefault(); dialogRef.value.focus() }
+    else if (event.shiftKey && (document.activeElement === first || !dialogRef.value.contains(document.activeElement))) { event.preventDefault(); last.focus() }
+    else if (!event.shiftKey && (document.activeElement === last || !dialogRef.value.contains(document.activeElement))) { event.preventDefault(); first.focus() }
+  }
   if (props.show && props.closeOnEscape && event.key === 'Escape' && [...openDialogs].pop() === dialogId) {
     emit('close')
   }

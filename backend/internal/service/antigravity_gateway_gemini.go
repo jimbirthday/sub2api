@@ -97,6 +97,10 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		return nil, s.writeGoogleError(c, http.StatusForbidden, fmt.Sprintf("model %s not in whitelist", originalModel))
 	}
 	forwardedModel := mappedModel
+	if err := EnforceUserModelRestriction(ctx, account, forwardedModel); err != nil {
+		WriteUserModelRestrictionError(c, UserModelRestrictionProtocolGoogle, err)
+		return nil, err
+	}
 
 	// 获取 access_token
 	if s.tokenProvider == nil {
@@ -168,6 +172,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		accountRepo:     s.accountRepo,
 		handleError:     s.handleUpstreamError,
 		requestedModel:  originalModel,
+		upstreamModel:   forwardedModel,
 		isStickySession: isStickySession, // ForwardGemini 由上层判断粘性会话
 		groupID:         forwardOpts.groupID,
 		sessionHash:     forwardOpts.sessionHash,
@@ -206,12 +211,19 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 			fallbackModel := s.settingService.GetFallbackModel(ctx, PlatformAntigravity)
 			if fallbackModel != "" && fallbackModel != mappedModel {
 				logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] Model not found (%s), retrying with fallback model %s (account: %s)", mappedModel, fallbackModel, account.Name)
+				if err := EnforceUserModelRestriction(ctx, account, fallbackModel); err != nil {
+					WriteUserModelRestrictionError(c, UserModelRestrictionProtocolGoogle, err)
+					return nil, err
+				}
 
 				fallbackWrapped, err := s.wrapV1InternalRequest(projectID, fallbackModel, injectedBody)
 				if err == nil {
 					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, fallbackWrapped)
 					if err == nil {
 						fallbackResp, err := s.httpUpstream.Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
+						if err != nil {
+							MarkCurrentModelExecutionAttemptUnknown(ctx)
+						}
 						if err == nil && fallbackResp.StatusCode < 400 {
 							_ = resp.Body.Close()
 							resp = fallbackResp
@@ -269,6 +281,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 					accountRepo:     s.accountRepo,
 					handleError:     s.handleUpstreamError,
 					requestedModel:  originalModel,
+					upstreamModel:   mappedModel,
 					isStickySession: isStickySession,
 					groupID:         forwardOpts.groupID,
 					sessionHash:     forwardOpts.sessionHash,

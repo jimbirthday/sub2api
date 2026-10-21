@@ -180,6 +180,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// 上游协议统一由 resolveUpstreamProtocol 判定（按模型分流时带上游模型目录）。OpenAI API Key 账号只会落到
 	// Responses / Chat Completions，上面的归一化对两条路径都生效。
 	routingModel := upstreamRoutingModel(account, body, "")
+	finalRestrictionModels := UserModelRestrictionModelsFromPayload(routingModel, body)
+	if account != nil && len(finalRestrictionModels) > 0 {
+		finalRestrictionModels[0] = normalizeOpenAIModelForUpstream(account, finalRestrictionModels[0])
+	}
+	if err := EnforceUserModelRestrictionWithoutBudget(ctx, account, finalRestrictionModels...); err != nil {
+		WriteUserModelRestrictionError(c, UserModelRestrictionProtocolOpenAI, err)
+		return nil, err
+	}
 	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
 		return nil, writeOpenCodeUnsupportedModelError(c, false, routingModel)
 	}
@@ -1057,6 +1065,29 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		proxyURL := ""
 		if account.ProxyID != nil && account.Proxy != nil {
 			proxyURL = account.Proxy.URL()
+		}
+
+		// Recheck the concrete serialized model dependencies for every HTTP
+		// attempt, including retries that changed the model or request body.
+		wireBody := body
+		if upstreamReq.GetBody != nil {
+			wireReader, wireErr := upstreamReq.GetBody()
+			if wireErr != nil {
+				return nil, wireErr
+			}
+			wireBody, wireErr = io.ReadAll(wireReader)
+			_ = wireReader.Close()
+			if wireErr != nil {
+				return nil, wireErr
+			}
+		}
+		UpdateModelExecutionPayload(ctx, wireBody)
+		if policyErr := EnforceUserModelRestriction(ctx, account, UserModelRestrictionModelsFromPayload(gjson.GetBytes(wireBody, "model").String(), wireBody)...); policyErr != nil {
+			if headerGuard != nil {
+				headerGuard.close()
+			}
+			WriteUserModelRestrictionError(c, UserModelRestrictionProtocolOpenAI, policyErr)
+			return nil, policyErr
 		}
 
 		// Send request

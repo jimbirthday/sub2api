@@ -1833,6 +1833,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	if err != nil {
 		return nil, err
 	}
+	UpdateModelExecutionPayload(ctx, responsesBody)
+	ctx = WithModelIdentityContext(ctx, "responses", "", "")
+	if err := EnforceUserModelRestriction(ctx, account, UserModelRestrictionModelsFromPayload(upstreamModel, responsesBody)...); err != nil {
+		WriteUserModelRestrictionError(c, UserModelRestrictionProtocolOpenAI, err)
+		return nil, err
+	}
 	upstreamCtx = withOpenAIImagesSelfBuiltRequest(upstreamCtx)
 	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, parsed.StickySessionSeed(), false)
 	if err != nil {

@@ -35,27 +35,32 @@ import (
 
 // OpenAIGatewayHandler handles OpenAI API gateway requests
 type OpenAIGatewayHandler struct {
-	compositeResolver          *service.CompositeRouteResolver
-	gatewayService             *service.OpenAIGatewayService
-	billingCacheService        *service.BillingCacheService
-	apiKeyService              *service.APIKeyService
-	usageRecordWorkerPool      *service.UsageRecordWorkerPool
-	errorPassthroughService    *service.ErrorPassthroughService
-	contentModerationService   *service.ContentModerationService
-	securityAuditCoordinator   *securityaudit.Coordinator
-	grokMediaEligibilityProber grokMediaEligibilityProber
-	opsService                 *service.OpsService
-	concurrencyHelper          *ConcurrencyHelper
-	imageLimiter               *imageConcurrencyLimiter
-	maxAccountSwitches         int
-	cfg                        *config.Config
-	promptInjectionService     *service.PromptInjectionService
+	compositeResolver           *service.CompositeRouteResolver
+	gatewayService              *service.OpenAIGatewayService
+	billingCacheService         *service.BillingCacheService
+	apiKeyService               *service.APIKeyService
+	usageRecordWorkerPool       *service.UsageRecordWorkerPool
+	errorPassthroughService     *service.ErrorPassthroughService
+	contentModerationService    *service.ContentModerationService
+	securityAuditCoordinator    *securityaudit.Coordinator
+	grokMediaEligibilityProber  grokMediaEligibilityProber
+	opsService                  *service.OpsService
+	concurrencyHelper           *ConcurrencyHelper
+	imageLimiter                *imageConcurrencyLimiter
+	maxAccountSwitches          int
+	cfg                         *config.Config
+	promptInjectionService      *service.PromptInjectionService
+	userModelRestrictionService *service.UserModelRestrictionService
 }
 
 // SetPromptInjectionService attaches the DB-backed prompt rule evaluator while
 // preserving the constructor signature used by existing tests.
 func (h *OpenAIGatewayHandler) SetPromptInjectionService(s *service.PromptInjectionService) {
 	h.promptInjectionService = s
+}
+
+func (h *OpenAIGatewayHandler) SetUserModelRestrictionService(s *service.UserModelRestrictionService) {
+	h.userModelRestrictionService = s
 }
 
 type openAIWSTurnChannelMappingSnapshot struct {
@@ -257,6 +262,7 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if parent == nil {
 		return base
 	}
+	base = service.CarryDistillationTelemetry(parent, base)
 	if clientRequestID, _ := parent.Value(ctxkey.ClientRequestID).(string); strings.TrimSpace(clientRequestID) != "" {
 		base = context.WithValue(base, ctxkey.ClientRequestID, strings.TrimSpace(clientRequestID))
 	}
@@ -2638,6 +2644,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		cyberTurnBodiesMu.Unlock()
 		return body
 	}
+	peekCyberTurnBody := func(turn int) []byte {
+		cyberTurnBodiesMu.Lock()
+		defer cyberTurnBodiesMu.Unlock()
+		return append([]byte(nil), cyberTurnBodies[turn]...)
+	}
 
 	// 解析渠道级模型映射
 	channelMappingWS, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, wsRouteModel)
@@ -2660,6 +2671,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	}
 	// 必须尽早注册，确保任何 early return 都能释放已获取的并发槽位。
 	defer releaseTurnSlots()
+	service.UpdateModelExecutionPayload(ctx, firstMessage)
 
 	userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlotForAPIKey(ctx, subject.UserID, subject.Concurrency, apiKey.ID)
 	if err != nil {
@@ -2672,6 +2684,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
+	observed, _ := h.concurrencyHelper.concurrencyService.GetUserConcurrency(ctx, subject.UserID)
+	if telemetryCtx, telemetryErr := service.BeginPreparedDistillationAttempt(ctx, observed, time.Now().UTC()); telemetryErr == nil {
+		ctx = telemetryCtx
+		c.Request = c.Request.WithContext(ctx)
+	}
 	ensureUserSlotHeld := func() bool {
 		if currentUserRelease != nil {
 			return true
@@ -3024,6 +3041,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// 后续 turn 的计费分组同样在 BeforeTurn 经认证缓存重取，使分组调价对
 		// 已打开的连接生效。
 		var turnBillingAPIKeys openAIWSTurnBillingAPIKeys
+		service.UpdateModelExecutionPayload(ctx, firstMessage)
+		if err := service.EnforceUserModelRestrictionWithoutBudget(ctx, account, service.UserModelRestrictionModelsFromPayload(reqModel, firstMessage)...); err != nil {
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+			middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
+			writeUserModelRestrictionWSError(ctx, wsConn, err)
+			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model is not available for this account")
+			return
+		}
 		// Passthrough ingress does not invoke BeforeTurn for the first frame.
 		if err := refreshTurnBilling(false); err != nil {
 			var closeErr *service.OpenAIWSClientCloseError
@@ -3043,6 +3068,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			ReasoningEffortMappings:     reasoningEffortMappings,
 			TurnStarted:                 recordTurnStart,
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
+				service.UpdateModelExecutionPayload(ctx, payload)
 				c.Set(securityAuditWSTurnContextKey, turn)
 				service.BeginOpsStreamTurn(c, turn)
 				setCyberTurnBody(turn, payload)
@@ -3058,6 +3084,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if err := refreshTurnBilling(false); err != nil {
 					return err
 				}
+				if err := service.BeginModelExecutionTurn(ctx, turn); err != nil {
+					return err
+				}
 				freshKey := billingSnapshot.Load().key
 				if !gjson.ValidBytes(payload) {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", errors.New("invalid json"))
@@ -3068,6 +3097,17 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				if model == "" {
 					model = reqModel
+				}
+				if h.userModelRestrictionService != nil {
+					// Check every dependency in the exact client frame. The driver
+					// check below is insufficient for image/tool models.
+					models := service.UserModelRestrictionModelsFromPayload(model, payload)
+					if err := service.EnforceUserModelRestrictionWithoutBudget(ctx, account, models...); err != nil {
+						service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+						middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
+						writeUserModelRestrictionWSError(ctx, wsConn, err)
+						return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "model is not available for this account", err)
+					}
 				}
 				// 分组级模型白名单：后续 turn 同样校验客户端模型（省略 model 时
 				// 沿用会话实际生效模型，含 session.update 轮换后的模型），不通过
@@ -3102,6 +3142,16 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					routeModel = wsRouteModel
 				}
 				mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, routeModel)
+				upstreamModel := strings.TrimSpace(mapping.MappedModel)
+				if upstreamModel == "" {
+					upstreamModel = routeModel
+				}
+				upstreamModel = account.GetMappedModel(upstreamModel)
+				if err := service.EnforceUserModelRestrictionWithoutBudget(ctx, account, upstreamModel); err != nil {
+					writeUserModelRestrictionWSError(ctx, wsConn, err)
+					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+					return "", service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "model is not available for this account", err)
+				}
 				mappedModelUnchanged := false
 				if previous := turnChannelMapping.Load(); previous != nil && previous.turn < turn {
 					mappedModelUnchanged = strings.TrimSpace(previous.mapping.MappedModel) == strings.TrimSpace(mapping.MappedModel)
@@ -3158,10 +3208,34 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
+				observed, _ := h.concurrencyHelper.concurrencyService.GetUserConcurrency(ctx, subject.UserID)
+				turnOperationID := fmt.Sprintf("%s:turn:%d", service.ModelExecutionOperationID(ctx), turn)
+				turnRequest := service.DistillationTelemetryRequest{
+					UserID: subject.UserID, APIKeyID: &apiKey.ID, OperationID: turnOperationID,
+					Provider: account.Platform, Model: reqModel, Cohort: "interactive",
+					ConfiguredConcurrency: billingSnapshot.Load().key.User.Concurrency,
+					ConfiguredRPM:         billingSnapshot.Load().key.User.RPMLimit, ObservedConcurrency: observed,
+					PromptMaterial: service.DistillationPromptMaterial(peekCyberTurnBody(turn)),
+				}
+				if telemetryCtx, telemetryErr := service.BeginDistillationAttempt(ctx, turnRequest, time.Now().UTC()); telemetryErr == nil {
+					ctx = telemetryCtx
+					c.Request = c.Request.WithContext(ctx)
+				}
 				return refreshTurnBilling(true)
 			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
 				turnStart := getTurnStart(turn)
+				var inputTokens, outputTokens *int64
+				if result != nil {
+					input := int64(result.Usage.InputTokens + result.Usage.CacheCreationInputTokens + result.Usage.CacheReadInputTokens)
+					output := int64(result.Usage.OutputTokens)
+					inputTokens, outputTokens = &input, &output
+				}
+				status := "completed"
+				if turnErr != nil {
+					status = "failed"
+				}
+				_ = service.CompleteDistillationAttempt(ctx, inputTokens, outputTokens, status, turnErr == nil && result != nil, time.Now().UTC())
 				cyberBlockBody := takeCyberTurnBody(turn)
 				// 每次 attempt 都清 cyber mark；failover 链结束前保留 recorded guard，
 				// 避免同一逻辑 turn 换号后重复落风控。CyberBlocked 必须在 submit 前
@@ -4154,6 +4228,36 @@ func writeCyberSessionBlockedWSError(ctx context.Context, conn *coderws.Conn) {
 	})
 	if err != nil {
 		payload = []byte(`{"event_id":"evt_cyber_session_blocked","type":"error","error":{"type":"permission_error","code":"session_blocked_by_cyber_policy","message":"This session is blocked by cyber-security policy, please start a new session"}}`)
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	_ = conn.Write(writeCtx, coderws.MessageText, payload)
+}
+
+func writeUserModelRestrictionWSError(ctx context.Context, conn *coderws.Conn, policyErr error) {
+	if conn == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	code := "MODEL_ACCESS_DENIED"
+	message := "Model is not available for this account"
+	if !errors.Is(policyErr, service.ErrUserModelRestrictionDenied) {
+		code = "MODEL_ACCESS_POLICY_UNAVAILABLE"
+		message = "Model access policy is temporarily unavailable"
+	}
+	payload, err := json.Marshal(gin.H{
+		"event_id": "evt_model_access_policy",
+		"type":     "error",
+		"error": gin.H{
+			"type":    "permission_error",
+			"code":    code,
+			"message": message,
+		},
+	})
+	if err != nil {
+		return
 	}
 	writeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()

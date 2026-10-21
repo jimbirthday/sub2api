@@ -208,6 +208,10 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 		account = nil
 	}
 	if err != nil || nativeResp == nil {
+		if errors.Is(err, service.ErrUserModelRestrictionDenied) || errors.Is(err, service.ErrUserModelRestrictionIdentityUnknown) || errors.Is(err, service.ErrUserModelRestrictionUnavailable) {
+			service.WriteUserModelRestrictionError(c, service.UserModelRestrictionProtocolOpenAI, err)
+			return
+		}
 		msg := "web search failed"
 		if err != nil {
 			msg = err.Error()
@@ -346,6 +350,11 @@ func (h *GatewayHandler) doGrokNativeWebSearch(ctx context.Context, c *gin.Conte
 		"stream":  false,
 	}
 	bodyBytes, _ := json.Marshal(searchBody)
+	service.UpdateModelExecutionPayload(ctx, bodyBytes)
+	searchModel, _ := searchBody["model"].(string)
+	if err := service.EnforceUserModelRestriction(ctx, account, service.UserModelRestrictionModelsFromPayload(searchModel, bodyBytes)...); err != nil {
+		return nil, "", err
+	}
 
 	respBytes, err := h.gatewayService.DoGrokNativeResponsesJSON(ctx, account, bodyBytes)
 	if err != nil {
@@ -366,6 +375,10 @@ func (h *GatewayHandler) doGrokNativeXSearch(ctx context.Context, c *gin.Context
 	maxResults = normalizeGrokWebSearchMaxResults(maxResults)
 	bodyBytes, err := buildGrokXSearchResponsesBody(req, model)
 	if err != nil {
+		return nil, "", err
+	}
+	service.UpdateModelExecutionPayload(ctx, bodyBytes)
+	if err := service.EnforceUserModelRestriction(ctx, account, service.UserModelRestrictionModelsFromPayload(model, bodyBytes)...); err != nil {
 		return nil, "", err
 	}
 	respBytes, err := h.gatewayService.DoGrokNativeResponsesJSON(ctx, account, bodyBytes)

@@ -639,6 +639,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/distillation-risk',
+    name: 'AdminDistillationRisk',
+    component: () => import('@/views/admin/DistillationRiskView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Behavior risk', titleKey: 'admin.distillationRisk.title', descriptionKey: 'admin.distillationRisk.description' }
+  },
+  {
+    path: '/admin/model-bans',
+    name: 'AdminModelBans',
+    component: () => import('@/views/admin/ModelBansView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Model access', titleKey: 'admin.modelBans.title', descriptionKey: 'admin.modelBans.description' }
+  },
+  {
     path: '/admin/risk-control',
     name: 'AdminRiskControl',
     component: () => import('@/views/admin/RiskControlView.vue'),

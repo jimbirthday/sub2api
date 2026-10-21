@@ -43,9 +43,11 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
+	"github.com/Wei-Shaw/sub2api/ent/usermodelrestriction"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/google/uuid"
 )
 
 // The init function reads all schema descriptors with runtime code
@@ -2409,6 +2411,48 @@ func init() {
 	userattributevalueDescValue := userattributevalueFields[2].Descriptor()
 	// userattributevalue.DefaultValue holds the default value on creation for the value field.
 	userattributevalue.DefaultValue = userattributevalueDescValue.Default.(string)
+	usermodelrestrictionFields := schema.UserModelRestriction{}.Fields()
+	_ = usermodelrestrictionFields
+	// usermodelrestrictionDescRuleID is the schema descriptor for rule_id field.
+	usermodelrestrictionDescRuleID := usermodelrestrictionFields[3].Descriptor()
+	// usermodelrestriction.DefaultRuleID holds the default value on creation for the rule_id field.
+	usermodelrestriction.DefaultRuleID = usermodelrestrictionDescRuleID.Default.(func() uuid.UUID)
+	// usermodelrestrictionDescAction is the schema descriptor for action field.
+	usermodelrestrictionDescAction := usermodelrestrictionFields[4].Descriptor()
+	// usermodelrestriction.DefaultAction holds the default value on creation for the action field.
+	usermodelrestriction.DefaultAction = usermodelrestrictionDescAction.Default.(string)
+	// usermodelrestriction.ActionValidator is a validator for the "action" field. It is called by the builders before save.
+	usermodelrestriction.ActionValidator = usermodelrestrictionDescAction.Validators[0].(func(string) error)
+	// usermodelrestrictionDescSource is the schema descriptor for source field.
+	usermodelrestrictionDescSource := usermodelrestrictionFields[7].Descriptor()
+	// usermodelrestriction.DefaultSource holds the default value on creation for the source field.
+	usermodelrestriction.DefaultSource = usermodelrestrictionDescSource.Default.(string)
+	// usermodelrestriction.SourceValidator is a validator for the "source" field. It is called by the builders before save.
+	usermodelrestriction.SourceValidator = usermodelrestrictionDescSource.Validators[0].(func(string) error)
+	// usermodelrestrictionDescNamespace is the schema descriptor for namespace field.
+	usermodelrestrictionDescNamespace := usermodelrestrictionFields[8].Descriptor()
+	// usermodelrestriction.NamespaceValidator is a validator for the "namespace" field. It is called by the builders before save.
+	usermodelrestriction.NamespaceValidator = usermodelrestrictionDescNamespace.Validators[0].(func(string) error)
+	// usermodelrestrictionDescCanonicalModel is the schema descriptor for canonical_model field.
+	usermodelrestrictionDescCanonicalModel := usermodelrestrictionFields[9].Descriptor()
+	// usermodelrestriction.CanonicalModelValidator is a validator for the "canonical_model" field. It is called by the builders before save.
+	usermodelrestriction.CanonicalModelValidator = usermodelrestrictionDescCanonicalModel.Validators[0].(func(string) error)
+	// usermodelrestrictionDescEnabled is the schema descriptor for enabled field.
+	usermodelrestrictionDescEnabled := usermodelrestrictionFields[10].Descriptor()
+	// usermodelrestriction.DefaultEnabled holds the default value on creation for the enabled field.
+	usermodelrestriction.DefaultEnabled = usermodelrestrictionDescEnabled.Default.(bool)
+	// usermodelrestrictionDescReason is the schema descriptor for reason field.
+	usermodelrestrictionDescReason := usermodelrestrictionFields[12].Descriptor()
+	// usermodelrestriction.DefaultReason holds the default value on creation for the reason field.
+	usermodelrestriction.DefaultReason = usermodelrestrictionDescReason.Default.(string)
+	// usermodelrestrictionDescCreatedAt is the schema descriptor for created_at field.
+	usermodelrestrictionDescCreatedAt := usermodelrestrictionFields[14].Descriptor()
+	// usermodelrestriction.DefaultCreatedAt holds the default value on creation for the created_at field.
+	usermodelrestriction.DefaultCreatedAt = usermodelrestrictionDescCreatedAt.Default.(func() time.Time)
+	// usermodelrestrictionDescUpdatedAt is the schema descriptor for updated_at field.
+	usermodelrestrictionDescUpdatedAt := usermodelrestrictionFields[15].Descriptor()
+	// usermodelrestriction.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	usermodelrestriction.DefaultUpdatedAt = usermodelrestrictionDescUpdatedAt.Default.(func() time.Time)
 	userplatformquotaMixin := schema.UserPlatformQuota{}.Mixin()
 	userplatformquotaMixinHooks1 := userplatformquotaMixin[1].Hooks()
 	userplatformquota.Hooks[0] = userplatformquotaMixinHooks1[0]

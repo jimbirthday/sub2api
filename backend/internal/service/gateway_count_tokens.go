@@ -46,6 +46,9 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 			return err
 		}
 	}
+	if err := EnforceUserModelRestrictionWithoutBudget(ctx, account, validationModel); err != nil {
+		return err
+	}
 
 	if account != nil && account.IsAnthropicAPIKeyPassthroughEnabled() {
 		passthroughBody := parsed.Body.Bytes()
@@ -140,6 +143,9 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 			parsed.Model = mappedModel
 			logger.LegacyPrintf("service.gateway", "CountTokens model mapping applied: %s -> %s (account: %s, source=%s)", originalReqModel, mappedModel, account.Name, mappingSource)
 		}
+	}
+	if err := EnforceUserModelRestrictionWithoutBudget(ctx, account, reqModel); err != nil {
+		return err
 	}
 
 	// 获取凭证
@@ -272,6 +278,9 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 // forwardCountTokensAnthropicAPIKeyPassthrough 透传 count_tokens 请求；upstreamModel 是 body 中实际发往上游的模型，
 // 仅用于上游错误处理按模型隔离。
 func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx context.Context, c *gin.Context, account *Account, body []byte, upstreamModel string) error {
+	if err := EnforceUserModelRestrictionWithoutBudget(ctx, account, upstreamModel); err != nil {
+		return err
+	}
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Failed to get access token")

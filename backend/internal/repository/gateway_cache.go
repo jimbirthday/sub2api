@@ -405,22 +405,23 @@ func (c *gatewayCache) SaveLiveCall(ctx context.Context, record *service.LiveCal
 		return fmt.Errorf("invalid live call record")
 	}
 	values := map[string]any{
-		"call_id":          record.CallID,
-		"account_id":       record.AccountID,
-		"api_key_id":       record.APIKeyID,
-		"user_id":          record.UserID,
-		"group_id":         record.GroupID,
-		"subscription_id":  record.SubscriptionID,
-		"lease_id":         record.LeaseID,
-		"model":            record.Model,
-		"created_at":       record.CreatedAt.UnixMilli(),
-		"expires_at":       record.ExpiresAt.UnixMilli(),
-		"controller":       record.Controller,
-		"controller_owner": record.ControllerOwner,
-		"user_agent":       record.UserAgent,
-		"ip_address":       record.IPAddress,
-		"inbound_endpoint": record.InboundEndpoint,
-		"attestation":      record.AttestationCiphertext,
+		"call_id":                record.CallID,
+		"account_id":             record.AccountID,
+		"api_key_id":             record.APIKeyID,
+		"user_id":                record.UserID,
+		"group_id":               record.GroupID,
+		"subscription_id":        record.SubscriptionID,
+		"lease_id":               record.LeaseID,
+		"model":                  record.Model,
+		"created_at":             record.CreatedAt.UnixMilli(),
+		"expires_at":             record.ExpiresAt.UnixMilli(),
+		"controller":             record.Controller,
+		"controller_owner":       record.ControllerOwner,
+		"user_agent":             record.UserAgent,
+		"ip_address":             record.IPAddress,
+		"inbound_endpoint":       record.InboundEndpoint,
+		"attestation":            record.AttestationCiphertext,
+		"execution_operation_id": record.ExecutionOperationID,
 	}
 	key := liveCallKey(record.CallHash)
 	pipe := c.rdb.TxPipeline()
@@ -462,6 +463,7 @@ func (c *gatewayCache) GetLiveCall(ctx context.Context, callHash string) (*servi
 		IPAddress:             values["ip_address"],
 		InboundEndpoint:       values["inbound_endpoint"],
 		AttestationCiphertext: values["attestation"],
+		ExecutionOperationID:  values["execution_operation_id"],
 	}, nil
 }
 

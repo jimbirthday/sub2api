@@ -2,13 +2,137 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
+)
+
+const modelExecutionKeyPrefix = "model_execution:"
+
+const executionProviderAttemptScore = 253402300799
+
+// Legacy request slots share a ZSET with durable, uncertain provider attempts.
+// Refreshing ordinary traffic must never give the whole set a TTL while an
+// attempt is still waiting for remote termination evidence.
+const preserveExecutionSlotTTLScript = `
+local function refreshSlotTTL(key, ttl)
+    if redis.call('ZCOUNT', key, 253402300799, '+inf') > 0 then
+        redis.call('PERSIST', key)
+    else
+        redis.call('EXPIRE', key, ttl)
+    end
+end
+`
+
+var (
+	reserveModelExecutionScript = redis.NewScript(`
+		local stateKey, opsKey, targetsKey, rpmKey = KEYS[1], KEYS[2], KEYS[3], KEYS[4]
+		local opID, targetsJSON, policy, catalog, payload = ARGV[1], ARGV[2], ARGV[3], ARGV[4], ARGV[5]
+		local userLimit, rpmLimit, batch, batchLimit = tonumber(ARGV[6]), tonumber(ARGV[7]), tonumber(ARGV[8]), tonumber(ARGV[9])
+		local existing = redis.call('HGET', opsKey, opID)
+		if existing then
+			local op = cjson.decode(existing)
+			if op.policy ~= policy or op.catalog ~= catalog or op.payload ~= payload or op.targets_json ~= targetsJSON then return {-2} end
+			return {1, op.revision, op.epoch, op.state, op.targets_json, op.payload, op.policy, op.catalog}
+		end
+		local running = tonumber(redis.call('HGET', stateKey, 'running') or '0')
+		local outstanding = tonumber(redis.call('HGET', stateKey, 'batch') or '0')
+		if userLimit > 0 and running + 1 > userLimit then return {0} end
+		if batchLimit > 0 and outstanding + batch > batchLimit then return {0} end
+		local targets = cjson.decode(targetsJSON)
+		for _, target in ipairs(targets) do
+			local used = tonumber(redis.call('HGET', targetsKey, target.id) or '0')
+			if target.limit > 0 and used + target.weight > target.limit then return {0} end
+		end
+		local now = tonumber(redis.call('TIME')[1]); local bucket = tostring(math.floor(now / 60))
+		if rpmLimit > 0 then
+			local rpm = tonumber(redis.call('HGET', rpmKey, 'u:' .. bucket) or '0')
+			if rpm + 1 > rpmLimit then return {0} end
+		end
+		for _, target in ipairs(targets) do
+			if target.rpm_limit > 0 then
+				local rpm = tonumber(redis.call('HGET', rpmKey, 'm:' .. bucket .. ':' .. target.id) or '0')
+				if rpm + 1 > target.rpm_limit then return {0} end
+			end
+		end
+		if rpmLimit > 0 then redis.call('HINCRBY', rpmKey, 'u:' .. bucket, 1) end
+		for _, target in ipairs(targets) do if target.rpm_limit > 0 then redis.call('HINCRBY', rpmKey, 'm:' .. bucket .. ':' .. target.id, 1) end end
+		if rpmLimit > 0 or #targets > 0 then redis.call('EXPIRE', rpmKey, 180) end
+		local epoch = tonumber(redis.call('HGET', stateKey, 'epoch') or '1')
+		redis.call('HSET', stateKey, 'epoch', epoch)
+		local op = {revision=1, epoch=epoch, state='reserved', targets_json=targetsJSON, policy=policy, catalog=catalog, payload=payload, batch=batch}
+		redis.call('HSET', opsKey, opID, cjson.encode(op))
+		redis.call('HINCRBY', stateKey, 'running', 1)
+		if batch > 0 then redis.call('HINCRBY', stateKey, 'batch', batch) end
+		for _, target in ipairs(targets) do redis.call('HINCRBY', targetsKey, target.id, target.weight) end
+		return {1, 1, epoch, 'reserved', targetsJSON, payload, policy, catalog}
+	`)
+	confirmModelExecutionScript = redis.NewScript(`
+		local raw = redis.call('HGET', KEYS[1], ARGV[1])
+		if not raw then return {-2} end
+		local op = cjson.decode(raw)
+		if op.epoch ~= tonumber(ARGV[3]) then return {-2} end
+		if op.policy ~= ARGV[5] or op.catalog ~= ARGV[6] or op.payload ~= ARGV[7] or op.targets_json ~= ARGV[4] then return {-2} end
+		if op.state == 'confirmed' then return {1, op.revision, op.epoch, op.state, op.targets_json, op.payload, op.policy, op.catalog} end
+		if op.revision ~= tonumber(ARGV[2]) or op.state ~= 'reserved' then return {-2} end
+		op.revision = op.revision + 1; op.state = 'confirmed'
+		redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(op))
+		return {1, op.revision, op.epoch, op.state, op.targets_json, op.payload, op.policy, op.catalog}
+	`)
+	mutateModelExecutionScript = redis.NewScript(`
+		local raw = redis.call('HGET', KEYS[1], ARGV[1])
+		if not raw then return {-2} end
+		local op = cjson.decode(raw)
+		if op.revision ~= tonumber(ARGV[2]) or op.epoch ~= tonumber(ARGV[3]) or op.state == 'unknown' then return {-2} end
+		local nextTargets = cjson.decode(ARGV[4]); local oldTargets = cjson.decode(op.targets_json)
+		local old = {}; local next = {}
+		for _, target in ipairs(oldTargets) do old[target.id] = target.weight end
+		for _, target in ipairs(nextTargets) do next[target.id] = target.weight end
+		if ARGV[8] == 'extend' then for id, weight in pairs(old) do if not next[id] or next[id] < weight then return {-2} end end end
+		for _, target in ipairs(nextTargets) do
+			local used = tonumber(redis.call('HGET', KEYS[2], target.id) or '0') - (old[target.id] or 0)
+			if target.limit > 0 and used + target.weight > target.limit then return {0} end
+		end
+		local now = tonumber(redis.call('TIME')[1]); local bucket = tostring(math.floor(now / 60))
+		for _, target in ipairs(nextTargets) do
+			if not old[target.id] and target.rpm_limit > 0 then
+				local rpm = tonumber(redis.call('HGET', KEYS[3], 'm:' .. bucket .. ':' .. target.id) or '0')
+				if rpm + 1 > target.rpm_limit then return {0} end
+			end
+		end
+		for id, weight in pairs(old) do if not next[id] then local remaining=redis.call('HINCRBY', KEYS[2], id, -weight); if remaining <= 0 then redis.call('HDEL', KEYS[2], id) end end end
+		for id, weight in pairs(next) do local delta = weight - (old[id] or 0); if delta ~= 0 then redis.call('HINCRBY', KEYS[2], id, delta) end end
+		for _, target in ipairs(nextTargets) do if not old[target.id] and target.rpm_limit > 0 then redis.call('HINCRBY', KEYS[3], 'm:' .. bucket .. ':' .. target.id, 1) end end
+		redis.call('EXPIRE', KEYS[3], 180)
+		op.state='reserved'; op.targets_json=ARGV[4]; op.policy=ARGV[5]; op.catalog=ARGV[6]; op.payload=ARGV[7]; op.revision=op.revision+1
+		redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(op))
+		return {1, op.revision, op.epoch, op.state, op.targets_json, op.payload, op.policy, op.catalog}
+	`)
+	finishModelExecutionScript = redis.NewScript(`
+		local raw = redis.call('HGET', KEYS[1], ARGV[1])
+		if not raw then return {1} end
+		local op = cjson.decode(raw)
+		if op.revision ~= tonumber(ARGV[2]) or op.epoch ~= tonumber(ARGV[3]) then return {-2} end
+		if ARGV[4] == 'unknown' then
+			if op.state == 'unknown' then return {1} end
+			op.state='unknown'; redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(op)); return {1}
+		end
+		local targets=cjson.decode(op.targets_json)
+		for _, target in ipairs(targets) do
+			local next=redis.call('HINCRBY', KEYS[2], target.id, -target.weight)
+			if next <= 0 then redis.call('HDEL', KEYS[2], target.id) end
+		end
+		local running=redis.call('HINCRBY', KEYS[3], 'running', -1); if running < 0 then redis.call('HSET', KEYS[3], 'running', 0) end
+		if op.batch and op.batch > 0 then local b=redis.call('HINCRBY', KEYS[3], 'batch', -op.batch); if b < 0 then redis.call('HSET', KEYS[3], 'batch', 0) end end
+		redis.call('HDEL', KEYS[1], ARGV[1]); return {1}
+	`)
+	advanceModelExecutionEpochScript = redis.NewScript(`return redis.call('HINCRBY', KEYS[1], 'epoch', 1)`)
 )
 
 // 并发控制缓存常量定义
@@ -68,7 +192,7 @@ var (
 	// ARGV[2] = TTL（秒）
 	// ARGV[3] = requestID
 	// 返回 {是否成功, Redis 当前秒}，Go 侧复用同一时间源写活跃索引，省去额外 TIME 往返。
-	acquireScript = redis.NewScript(`
+	acquireScript = redis.NewScript(preserveExecutionSlotTTLScript + `
 		-- Redis 3.2-4.x compat: opt into effects replication so redis.call('TIME')
 		-- replicates correctly. No-op on Redis 5.0+ (effects replication is default).
 		redis.replicate_commands()
@@ -91,7 +215,7 @@ var (
 		local exists = redis.call('ZSCORE', key, requestID)
 		if exists ~= false then
 			redis.call('ZADD', key, now, requestID)
-			redis.call('EXPIRE', key, ttl)
+			refreshSlotTTL(key, ttl)
 			return {1, now}
 		end
 
@@ -99,7 +223,7 @@ var (
 		local count = redis.call('ZCARD', key) + redis.call('ZCARD', liveKey)
 		if count < maxConcurrency then
 			redis.call('ZADD', key, now, requestID)
-			redis.call('EXPIRE', key, ttl)
+			refreshSlotTTL(key, ttl)
 			return {1, now}
 		end
 
@@ -184,7 +308,7 @@ var (
 	// KEYS[1] = 有序集合键
 	// ARGV[1] = TTL（秒）
 	// ARGV[2] = requestID
-	trackSlotScript = redis.NewScript(`
+	trackSlotScript = redis.NewScript(preserveExecutionSlotTTLScript + `
 		-- Redis 3.2-4.x compat: opt into effects replication so redis.call('TIME')
 		-- replicates correctly. No-op on Redis 5.0+ (effects replication is default).
 		redis.replicate_commands()
@@ -198,7 +322,7 @@ var (
 
 		redis.call('ZREMRANGEBYSCORE', key, '-inf', expireBefore)
 		redis.call('ZADD', key, now, requestID)
-		redis.call('EXPIRE', key, ttl)
+		refreshSlotTTL(key, ttl)
 		return 1
 	`)
 
@@ -312,7 +436,7 @@ var (
 	// cleanupExpiredSlotsScript 清理单个账号/用户有序集合中过期槽位
 	// KEYS[1] = 有序集合键
 	// ARGV[1] = TTL（秒）
-	cleanupExpiredSlotsScript = redis.NewScript(`
+	cleanupExpiredSlotsScript = redis.NewScript(preserveExecutionSlotTTLScript + `
 		-- Redis 3.2-4.x compat: opt into effects replication so redis.call('TIME')
 		-- replicates correctly. No-op on Redis 5.0+ (effects replication is default).
 		redis.replicate_commands()
@@ -325,30 +449,25 @@ var (
 		if redis.call('ZCARD', key) == 0 then
 			redis.call('DEL', key)
 		else
-			redis.call('EXPIRE', key, ttl)
+			refreshSlotTTL(key, ttl)
 		end
 		return 1
 	`)
 
-	// startupCleanupSlotScript 清理单个槽位 key 中非当前进程前缀的成员，避免 Redis Cluster CROSSSLOT。
-	// KEYS[1] 是有序集合键，ARGV[1] 是当前进程前缀，ARGV[2] 是槽位 TTL。
+	// startupCleanupSlotScript only removes expired members. Process prefixes
+	// identify ownership, but another live instance's slots are still valid.
+	// KEYS[1] is the sorted-set key and ARGV[1] is the slot TTL.
 	// 返回 {清除数量, 剩余成员数}，Go 侧据剩余数决定索引 member 去留，无需再回读槽位。
-	startupCleanupSlotScript = redis.NewScript(`
+	startupCleanupSlotScript = redis.NewScript(preserveExecutionSlotTTLScript + `
 		local key = KEYS[1]
-		local activePrefix = ARGV[1]
-		local slotTTL = tonumber(ARGV[2])
-		local removed = 0
-		local members = redis.call('ZRANGE', key, 0, -1)
-		for _, member in ipairs(members) do
-			if string.sub(member, 1, string.len(activePrefix)) ~= activePrefix then
-				removed = removed + redis.call('ZREM', key, member)
-			end
-		end
+		local slotTTL = tonumber(ARGV[1])
+		local now = tonumber(redis.call('TIME')[1])
+		local removed = redis.call('ZREMRANGEBYSCORE', key, '-inf', now - slotTTL)
 		local remaining = redis.call('ZCARD', key)
 		if remaining == 0 then
 			redis.call('DEL', key)
 		else
-			redis.call('EXPIRE', key, slotTTL)
+			refreshSlotTTL(key, slotTTL)
 		end
 		return {removed, remaining}
 	`)
@@ -358,6 +477,114 @@ type concurrencyCache struct {
 	rdb                 *redis.Client
 	slotTTLSeconds      int // 槽位过期时间（秒）
 	waitQueueTTLSeconds int // 等待队列过期时间（秒）
+}
+
+type modelExecutionTarget struct {
+	ID       string `json:"id"`
+	Weight   int    `json:"weight"`
+	Limit    int    `json:"limit"`
+	RPMLimit int    `json:"rpm_limit"`
+}
+
+func modelExecutionBaseKey(userID int64) string {
+	return fmt.Sprintf("%s{u:%d}", modelExecutionKeyPrefix, userID)
+}
+func modelExecutionStateKey(userID int64) string   { return modelExecutionBaseKey(userID) + ":state" }
+func modelExecutionOpsKey(userID int64) string     { return modelExecutionBaseKey(userID) + ":ops" }
+func modelExecutionTargetsKey(userID int64) string { return modelExecutionBaseKey(userID) + ":targets" }
+func modelExecutionRPMKey(userID int64) string     { return modelExecutionBaseKey(userID) + ":rpm" }
+
+func encodeModelExecutionTargets(targets []string, weights, limits, rpmLimits map[string]int) ([]modelExecutionTarget, error) {
+	seen := make(map[string]struct{}, len(targets))
+	result := make([]modelExecutionTarget, 0, len(targets))
+	for _, raw := range targets {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		weight := 1
+		if weights != nil && weights[id] > 0 {
+			weight = weights[id]
+		}
+		limit := 0
+		if limits != nil && limits[id] > 0 {
+			limit = limits[id]
+		}
+		rpm := 0
+		if rpmLimits != nil && rpmLimits[id] > 0 {
+			rpm = rpmLimits[id]
+		}
+		result = append(result, modelExecutionTarget{ID: id, Weight: weight, Limit: limit, RPMLimit: rpm})
+	}
+	if len(result) == 0 {
+		return nil, errors.New("model execution targets are empty")
+	}
+	return result, nil
+}
+
+func modelExecutionLeaseFromResult(values []any) (*service.ModelExecutionLease, error) {
+	if len(values) == 0 {
+		return nil, service.ErrModelExecutionBudgetUnavailable
+	}
+	code := redisInt(values[0])
+	if code == 0 {
+		return nil, service.ErrModelExecutionBudgetExceeded
+	}
+	if code < 0 {
+		return nil, service.ErrModelExecutionRevisionConflict
+	}
+	if len(values) < 6 {
+		return nil, service.ErrModelExecutionBudgetUnavailable
+	}
+	revision, epoch := redisInt64(values[1]), redisInt64(values[2])
+	state := redisString(values[3])
+	rawTargets := redisString(values[4])
+	payload := redisString(values[5])
+	var targets []modelExecutionTarget
+	if json.Unmarshal([]byte(rawTargets), &targets) != nil {
+		return nil, service.ErrModelExecutionBudgetUnavailable
+	}
+	ids := make([]string, 0, len(targets))
+	for _, target := range targets {
+		ids = append(ids, target.ID)
+	}
+	lease := &service.ModelExecutionLease{Revision: revision, Epoch: epoch, State: state, Targets: ids, PayloadHash: payload}
+	if len(values) >= 8 {
+		lease.PolicyRevision = redisInt64(values[6])
+		lease.CatalogRevision = redisInt64(values[7])
+	}
+	return lease, nil
+}
+
+func redisInt(value any) int { return int(redisInt64(value)) }
+func redisInt64(value any) int64 {
+	switch v := value.(type) {
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case string:
+		n, _ := strconv.ParseInt(v, 10, 64)
+		return n
+	case []byte:
+		n, _ := strconv.ParseInt(string(v), 10, 64)
+		return n
+	}
+	return 0
+}
+func redisString(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 // NewConcurrencyCache 创建并发控制缓存
@@ -375,6 +602,94 @@ func NewConcurrencyCache(rdb *redis.Client, slotTTLMinutes int, waitQueueTTLSeco
 		slotTTLSeconds:      slotTTLMinutes * 60,
 		waitQueueTTLSeconds: waitQueueTTLSeconds,
 	}
+}
+
+func (c *concurrencyCache) ReserveModelExecution(ctx context.Context, r service.ModelExecutionReservation) (*service.ModelExecutionLease, error) {
+	if c == nil || c.rdb == nil || r.UserID <= 0 || strings.TrimSpace(r.OperationID) == "" {
+		return nil, service.ErrModelExecutionBudgetUnavailable
+	}
+	targets, err := encodeModelExecutionTargets(r.Targets, r.TargetWeights, r.TargetLimits, r.TargetRPMLimits)
+	if err != nil {
+		return nil, service.ErrModelExecutionBudgetUnavailable
+	}
+	raw, _ := json.Marshal(targets)
+	result, err := reserveModelExecutionScript.Run(ctx, c.rdb, []string{modelExecutionStateKey(r.UserID), modelExecutionOpsKey(r.UserID), modelExecutionTargetsKey(r.UserID), modelExecutionRPMKey(r.UserID)}, r.OperationID, string(raw), strconv.FormatInt(r.PolicyRevision, 10), strconv.FormatInt(r.CatalogRevision, 10), r.PayloadHash, r.UserLimit, r.RPMLimit, r.BatchOutstanding, r.BatchLimit).Slice()
+	if err != nil {
+		return nil, fmt.Errorf("reserve model execution: %w", err)
+	}
+	lease, err := modelExecutionLeaseFromResult(result)
+	if lease != nil {
+		lease.UserID = r.UserID
+		lease.OperationID = r.OperationID
+	}
+	return lease, err
+}
+
+func (c *concurrencyCache) ConfirmModelExecution(ctx context.Context, r service.ModelExecutionConfirmation) (*service.ModelExecutionLease, error) {
+	targets, err := encodeModelExecutionTargets(r.Targets, r.TargetWeights, r.TargetLimits, r.TargetRPMLimits)
+	if err != nil {
+		return nil, service.ErrModelExecutionBudgetUnavailable
+	}
+	raw, _ := json.Marshal(targets)
+	result, err := confirmModelExecutionScript.Run(ctx, c.rdb, []string{modelExecutionOpsKey(r.UserID)}, r.OperationID, r.ExpectedRevision, r.ExpectedEpoch, string(raw), strconv.FormatInt(r.PolicyRevision, 10), strconv.FormatInt(r.CatalogRevision, 10), r.PayloadHash).Slice()
+	if err != nil {
+		return nil, fmt.Errorf("confirm model execution: %w", err)
+	}
+	lease, err := modelExecutionLeaseFromResult(result)
+	if lease != nil {
+		lease.UserID = r.UserID
+		lease.OperationID = r.OperationID
+	}
+	return lease, err
+}
+
+func (c *concurrencyCache) mutateModelExecution(ctx context.Context, userID int64, operationID string, revision, epoch int64, targets []string, weights, limits, rpmLimits map[string]int, policy, catalog int64, payload, mode string) (*service.ModelExecutionLease, error) {
+	encoded, err := encodeModelExecutionTargets(targets, weights, limits, rpmLimits)
+	if err != nil {
+		return nil, service.ErrModelExecutionBudgetUnavailable
+	}
+	raw, _ := json.Marshal(encoded)
+	result, err := mutateModelExecutionScript.Run(ctx, c.rdb, []string{modelExecutionOpsKey(userID), modelExecutionTargetsKey(userID), modelExecutionRPMKey(userID)}, operationID, revision, epoch, string(raw), strconv.FormatInt(policy, 10), strconv.FormatInt(catalog, 10), payload, mode).Slice()
+	if err != nil {
+		return nil, fmt.Errorf("%s model execution: %w", mode, err)
+	}
+	lease, err := modelExecutionLeaseFromResult(result)
+	if lease != nil {
+		lease.UserID = userID
+		lease.OperationID = operationID
+	}
+	return lease, err
+}
+
+func (c *concurrencyCache) ExtendModelExecution(ctx context.Context, r service.ModelExecutionExtension) (*service.ModelExecutionLease, error) {
+	return c.mutateModelExecution(ctx, r.UserID, r.OperationID, r.ExpectedRevision, r.ExpectedEpoch, r.Targets, r.TargetWeights, r.TargetLimits, r.TargetRPMLimits, r.PolicyRevision, r.CatalogRevision, r.PayloadHash, "extend")
+}
+func (c *concurrencyCache) RetargetModelExecution(ctx context.Context, r service.ModelExecutionRetarget) (*service.ModelExecutionLease, error) {
+	return c.mutateModelExecution(ctx, r.UserID, r.OperationID, r.ExpectedRevision, r.ExpectedEpoch, r.Targets, r.TargetWeights, r.TargetLimits, r.TargetRPMLimits, r.PolicyRevision, r.CatalogRevision, r.PayloadHash, "retarget")
+}
+
+func (c *concurrencyCache) finishModelExecution(ctx context.Context, userID int64, operationID string, revision, epoch int64, mode string) error {
+	result, err := finishModelExecutionScript.Run(ctx, c.rdb, []string{modelExecutionOpsKey(userID), modelExecutionTargetsKey(userID), modelExecutionStateKey(userID)}, operationID, revision, epoch, mode).Slice()
+	if err != nil {
+		return fmt.Errorf("%s model execution: %w", mode, err)
+	}
+	if len(result) > 0 && redisInt(result[0]) < 0 {
+		return service.ErrModelExecutionRevisionConflict
+	}
+	return nil
+}
+func (c *concurrencyCache) ReleaseModelExecution(ctx context.Context, userID int64, operationID string, revision, epoch int64) error {
+	return c.finishModelExecution(ctx, userID, operationID, revision, epoch, "release")
+}
+func (c *concurrencyCache) MarkModelExecutionUnknown(ctx context.Context, userID int64, operationID string, revision, epoch int64) error {
+	return c.finishModelExecution(ctx, userID, operationID, revision, epoch, "unknown")
+}
+func (c *concurrencyCache) AdvanceModelExecutionEpoch(ctx context.Context, userID int64) (int64, error) {
+	result, err := advanceModelExecutionEpochScript.Run(ctx, c.rdb, []string{modelExecutionStateKey(userID)}).Int64()
+	if err != nil {
+		return 0, fmt.Errorf("advance model execution epoch: %w", err)
+	}
+	return result, nil
 }
 
 // Helper functions for key generation
@@ -1138,7 +1453,7 @@ func (c *concurrencyCache) reconcileExpiredIndexCandidates(ctx context.Context, 
 	return nil
 }
 
-// CleanupStaleProcessSlots 启动时清理非当前进程前缀的槽位。
+// CleanupStaleProcessSlots 启动时仅清理已过期的普通槽位；其他进程前缀不能证明执行已结束。
 // 清理范围来自活跃索引（含 score 已过期的成员——它们往往正是崩溃进程留下的残留），
 // 避免在 Redis 上 SCAN 全部 concurrency:* 键；另有一次性迁移清扫兜底索引机制上线前的遗留等待计数。
 // API Key 槽位（concurrency:api_key:*）是 stats-only 数据：每次 Track/读取都会按分数
@@ -1217,13 +1532,13 @@ func (c *concurrencyCache) allIndexMembers(ctx context.Context, indexKey string)
 }
 
 // cleanupStaleProcessSlotsForIndex 逐个处理索引中的账号/用户。
-// Lua 脚本一次只碰一个槽位 key，兼容 Redis Cluster，随后删除重启后已失效的等待计数；
+// Lua 脚本一次只碰一个槽位 key，兼容 Redis Cluster，保留可能属于其他实例的等待计数；
 // 索引 member 的去留由脚本返回的剩余槽位数决定，最后批量写回。
 func (c *concurrencyCache) cleanupStaleProcessSlotsForIndex(
 	ctx context.Context,
 	spec slotIndexSpec,
 	members []string,
-	activeRequestPrefix string,
+	_ string,
 	now int64,
 ) error {
 	staleMembers := make([]string, 0)
@@ -1235,14 +1550,12 @@ func (c *concurrencyCache) cleanupStaleProcessSlotsForIndex(
 			continue
 		}
 
-		_, remaining, err := runScriptInt64Pair(ctx, c.rdb, startupCleanupSlotScript, []string{spec.slotKey(id)}, activeRequestPrefix, c.slotTTLSeconds)
+		_, remaining, err := runScriptInt64Pair(ctx, c.rdb, startupCleanupSlotScript, []string{spec.slotKey(id)}, c.slotTTLSeconds)
 		if err != nil {
 			return fmt.Errorf("cleanup stale process slots %s: %w", spec.slotKey(id), err)
 		}
-		// 等待计数属于已死进程，直接删除；剩余槽位（当前进程前缀）决定索引 member 去留。
-		if err := c.rdb.Del(ctx, spec.waitKey(id)).Err(); err != nil {
-			return fmt.Errorf("delete stale wait key %s: %w", spec.waitKey(id), err)
-		}
+		// Wait counters and surviving slots may belong to another live instance;
+		// their own TTL/release path remains authoritative.
 		if remaining > 0 {
 			refreshed = append(refreshed, redis.Z{
 				Score:  float64(now + int64(c.slotTTLSeconds)),
@@ -1258,5 +1571,89 @@ func (c *concurrencyCache) cleanupStaleProcessSlotsForIndex(
 		}
 	}
 	c.removeActiveIndexMembers(ctx, spec.indexKey, staleMembers)
+	return nil
+}
+
+// SyncRecoveredBatchOutstanding replaces the operation's pending count by CAS;
+// repeated terminal-item reconciliation cannot decrement the counter twice.
+func (c *concurrencyCache) SyncRecoveredBatchOutstanding(ctx context.Context, userID int64, operationID string, pending int) error {
+	_, err := c.rdb.Eval(ctx, `local raw=redis.call('HGET',KEYS[1],ARGV[1]);if not raw then return 0 end;local op=cjson.decode(raw);local old=op.batch or 0;local n=tonumber(ARGV[2]);redis.call('HINCRBY',KEYS[2],'batch',n-old);op.batch=n;redis.call('HSET',KEYS[1],ARGV[1],cjson.encode(op));return 1`, []string{modelExecutionOpsKey(userID), modelExecutionStateKey(userID)}, operationID, pending).Result()
+	return err
+}
+
+// Provider attempts are durable unknown occupancy. A future score keeps the
+// legacy TTL reaper from treating silence as proof of remote termination.
+func (c *concurrencyCache) RestoreExecutionProviderAttempt(ctx context.Context, accountID int64, provider, attemptID string) error {
+	if accountID > 0 {
+		// ZADD and PERSIST must be atomic with legacy slot refreshes.
+		if err := c.rdb.Eval(ctx, `redis.call('ZADD',KEYS[1],ARGV[1],ARGV[2]);redis.call('PERSIST',KEYS[1]);return 1`, []string{accountSlotKey(accountID)}, executionProviderAttemptScore, "intent:"+attemptID).Err(); err != nil {
+			return err
+		}
+	}
+	return c.rdb.SAdd(ctx, "model_execution:provider:"+provider, attemptID).Err()
+}
+
+func (c *concurrencyCache) ReleaseExecutionProviderAttempt(ctx context.Context, accountID int64, provider, attemptID string) error {
+	if accountID > 0 {
+		if err := c.rdb.ZRem(ctx, accountSlotKey(accountID), "intent:"+attemptID).Err(); err != nil {
+			return err
+		}
+	}
+	return c.rdb.SRem(ctx, "model_execution:provider:"+provider, attemptID).Err()
+}
+
+func (c *concurrencyCache) ReclaimExecutionOperation(ctx context.Context, userID int64, operationID string) error {
+	raw, err := c.rdb.HGet(ctx, modelExecutionOpsKey(userID), operationID).Result()
+	if err == redis.Nil {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var op struct {
+		Revision int64 `json:"revision"`
+		Epoch    int64 `json:"epoch"`
+	}
+	if err = json.Unmarshal([]byte(raw), &op); err != nil {
+		return err
+	}
+	return c.ReleaseModelExecution(ctx, userID, operationID, op.Revision, op.Epoch)
+}
+
+// RestoreUnknownModelExecution unions durable uncertain dependencies with an
+// existing lease and fences that lease. This is recovery, not a new admission:
+// capacity already consumed by a provider must be counted even above a cap.
+func (c *concurrencyCache) RestoreUnknownModelExecution(ctx context.Context, userID int64, operationID string, targets []string) error {
+	encoded, err := encodeModelExecutionTargets(targets, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(encoded)
+	if err != nil {
+		return err
+	}
+	result, err := c.rdb.Eval(ctx, `
+		local raw=redis.call('HGET',KEYS[1],ARGV[1])
+		if not raw then return -2 end
+		local op=cjson.decode(raw)
+		local targets=cjson.decode(op.targets_json)
+		local seen={}
+		for _,t in ipairs(targets) do seen[t.id]=true end
+		for _,t in ipairs(cjson.decode(ARGV[2])) do
+			if not seen[t.id] then
+				table.insert(targets,t);seen[t.id]=true
+				redis.call('HINCRBY',KEYS[2],t.id,t.weight)
+			end
+		end
+		op.targets_json=cjson.encode(targets);op.state='unknown'
+		redis.call('HSET',KEYS[1],ARGV[1],cjson.encode(op))
+		return 1
+	`, []string{modelExecutionOpsKey(userID), modelExecutionTargetsKey(userID)}, operationID, string(raw)).Int()
+	if err != nil {
+		return err
+	}
+	if result != 1 {
+		return service.ErrModelExecutionRevisionConflict
+	}
 	return nil
 }

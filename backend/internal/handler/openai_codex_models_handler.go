@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -35,6 +38,11 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	}
 
 	ifNoneMatch := c.GetHeader("If-None-Match")
+	manifestIfNoneMatch := ifNoneMatch
+	if h.userModelRestrictionService != nil && apiKey.UserID > 0 {
+		// A group-level validator cannot validate a user-filtered representation.
+		manifestIfNoneMatch = ""
+	}
 	// 固定账号分支：开启后只用选定账号拉取 manifest，不经过调度器；
 	// 全部不可用/全部失败时按 FallbackToScheduler 决定回退调度器或返回错误。
 	if apiKey.Group.Platform == service.PlatformOpenAI &&
@@ -60,11 +68,15 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		} else {
 			// 让 ops 错误日志携带实际拉取成功的首个固定账号。
 			setOpsSelectedAccount(c, pinnedAccount.ID, pinnedAccount.Platform)
-			if err := h.gatewayService.MergeGroupConfiguredCodexModels(c.Request.Context(), apiKey.Group, pinnedManifest, ifNoneMatch); err != nil {
+			if err := h.gatewayService.MergeGroupConfiguredCodexModels(c.Request.Context(), apiKey.Group, pinnedManifest, manifestIfNoneMatch); err != nil {
 				h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to build Codex models manifest")
 				return
 			}
 			if c.Request.Context().Err() != nil {
+				return
+			}
+			if err := filterCodexManifestByUser(c.Request.Context(), pinnedManifest, h.userModelRestrictionService, apiKey.UserID, apiKey.Group.Platform, ifNoneMatch); err != nil {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Model access policy is temporarily unavailable")
 				return
 			}
 			writeOpenAIModelsResponse(c, pinnedManifest)
@@ -76,7 +88,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		configuredManifest, configured, err := h.gatewayService.BuildGroupConfiguredCodexModelsManifest(
 			c.Request.Context(),
 			apiKey.Group,
-			ifNoneMatch,
+			manifestIfNoneMatch,
 		)
 		if err != nil {
 			if c.Request.Context().Err() != nil {
@@ -86,6 +98,10 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 			return
 		}
 		if configured {
+			if err := filterCodexManifestByUser(c.Request.Context(), configuredManifest, h.userModelRestrictionService, apiKey.UserID, apiKey.Group.Platform, ifNoneMatch); err != nil {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Model access policy is temporarily unavailable")
+				return
+			}
 			writeOpenAIModelsResponse(c, configuredManifest)
 			return
 		}
@@ -139,15 +155,75 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 			h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to apply model mappings")
 			return
 		}
-		if err := h.gatewayService.MergeGroupConfiguredCodexModels(c.Request.Context(), apiKey.Group, manifest, ifNoneMatch); err != nil {
+		if err := h.gatewayService.MergeGroupConfiguredCodexModels(c.Request.Context(), apiKey.Group, manifest, manifestIfNoneMatch); err != nil {
 			h.errorResponse(c, http.StatusInternalServerError, "api_error", "Failed to build Codex models manifest")
 			return
 		}
 		if c.Request.Context().Err() != nil {
 			return
 		}
+		if err := filterCodexManifestByUser(c.Request.Context(), manifest, h.userModelRestrictionService, apiKey.UserID, account.Platform, ifNoneMatch); err != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Model access policy is temporarily unavailable")
+			return
+		}
 
 		writeOpenAIModelsResponse(c, manifest)
 		return
 	}
+}
+
+func filterCodexManifestByUser(ctx context.Context, manifest *service.OpenAIModelsResponse, policies *service.UserModelRestrictionService, userID int64, platform, ifNoneMatch string) error {
+	if manifest == nil || policies == nil || userID <= 0 {
+		return nil
+	}
+	if manifest.NotModified || len(manifest.Body) == 0 {
+		return fmt.Errorf("user-filtered manifest has no response body")
+	}
+	var envelope struct {
+		Models []json.RawMessage `json:"models"`
+	}
+	if err := json.Unmarshal(manifest.Body, &envelope); err != nil {
+		return err
+	}
+	ids := make([]string, len(envelope.Models))
+	for i, raw := range envelope.Models {
+		var descriptor struct {
+			Slug string `json:"slug"`
+		}
+		if err := json.Unmarshal(raw, &descriptor); err != nil || descriptor.Slug == "" {
+			return fmt.Errorf("invalid Codex model catalogue entry")
+		}
+		ids[i] = descriptor.Slug
+	}
+	allowedIDs, err := filterUserModelRestrictionIDsChecked(ctx, policies, userID, platform, ids)
+	if err != nil {
+		return err
+	}
+	allowed := make(map[string]int, len(allowedIDs))
+	for _, id := range allowedIDs {
+		allowed[id]++
+	}
+	kept := make([]json.RawMessage, 0, len(allowedIDs))
+	for i, raw := range envelope.Models {
+		if allowed[ids[i]] > 0 {
+			kept = append(kept, raw)
+			allowed[ids[i]]--
+		}
+	}
+	var generic map[string]json.RawMessage
+	if err := json.Unmarshal(manifest.Body, &generic); err != nil {
+		return err
+	}
+	generic["models"], _ = json.Marshal(kept)
+	body, err := json.Marshal(generic)
+	if err != nil {
+		return err
+	}
+	manifest.Body = body
+	manifest.ETag = service.CodexModelsManifestETag(body)
+	manifest.NotModified = service.CodexModelsManifestETagMatches(ifNoneMatch, manifest.ETag)
+	if manifest.NotModified {
+		manifest.Body = nil
+	}
+	return nil
 }

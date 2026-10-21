@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -20,8 +22,16 @@ func (h *GatewayHandler) pinnedOpenAIModels(c *gin.Context, group *service.Group
 		return
 	}
 	etag := c.GetHeader("If-None-Match")
+	clientETag := etag
 	if c.Param("model") != "" {
 		etag = "" // A collection ETag cannot validate a single-model representation.
+	}
+	// The upstream validator is shared across users. Once a user policy is in
+	// play, a 304 based on that shared validator could make the client reuse a
+	// catalogue that still contains a model newly denied for this user.
+	apiKey, hasAPIKey := middleware2.GetAPIKeyFromContext(c)
+	if hasAPIKey && apiKey != nil && h.userModelRestrictionService != nil && apiKey.UserID > 0 {
+		etag = ""
 	}
 	response, account, err := h.openAIGatewayService.FetchPinnedOpenAIModelsList(
 		c.Request.Context(), group, h.maxAccountSwitches, etag,
@@ -38,7 +48,63 @@ func (h *GatewayHandler) pinnedOpenAIModels(c *gin.Context, group *service.Group
 		return
 	}
 	setOpsSelectedAccount(c, account.ID, account.Platform)
+	if apiKey, ok := middleware2.GetAPIKeyFromContext(c); ok && apiKey != nil && apiKey.UserID > 0 && h.userModelRestrictionService != nil && response != nil && !response.NotModified {
+		filtered, filterErr := filterOpenAIModelsBodyByUser(c.Request.Context(), response.Body, h.userModelRestrictionService, apiKey.UserID, account.Platform)
+		if filterErr != nil {
+			writeOpenAIModelsError(c, http.StatusServiceUnavailable, "api_error", "Model access policy is temporarily unavailable")
+			return
+		}
+		response.Body = filtered
+		response.ETag = service.CodexModelsManifestETag(filtered)
+		response.NotModified = service.CodexModelsManifestETagMatches(clientETag, response.ETag)
+		if response.NotModified {
+			response.Body = nil
+		}
+	}
 	writeOpenAIModelsResponse(c, response)
+}
+
+func filterOpenAIModelsBodyByUser(ctx context.Context, body []byte, policies *service.UserModelRestrictionService, userID int64, platform string) ([]byte, error) {
+	if policies == nil || userID <= 0 {
+		return body, nil
+	}
+	var envelope struct {
+		Data []json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(envelope.Data))
+	for i, raw := range envelope.Data {
+		var model struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &model); err != nil || model.ID == "" {
+			return nil, fmt.Errorf("invalid model catalogue entry")
+		}
+		ids[i] = model.ID
+	}
+	allowedIDs, err := filterUserModelRestrictionIDsChecked(ctx, policies, userID, platform, ids)
+	if err != nil {
+		return nil, err
+	}
+	allowed := make(map[string]int, len(allowedIDs))
+	for _, id := range allowedIDs {
+		allowed[id]++
+	}
+	kept := make([]json.RawMessage, 0, len(allowedIDs))
+	for i, raw := range envelope.Data {
+		if allowed[ids[i]] > 0 {
+			kept = append(kept, raw)
+			allowed[ids[i]]--
+		}
+	}
+	var generic map[string]json.RawMessage
+	if err := json.Unmarshal(body, &generic); err != nil {
+		return nil, err
+	}
+	generic["data"], _ = json.Marshal(kept)
+	return json.Marshal(generic)
 }
 
 func writeOpenAIModelsError(c *gin.Context, status int, errorType, message string) {

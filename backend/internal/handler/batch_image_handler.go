@@ -142,6 +142,24 @@ func (h *BatchImageHandler) Models(c *gin.Context) {
 	// 分组级模型白名单：ListModels 已按分组账号枚举，这里再按白名单过滤一次。
 	if apiKey, ok := middleware.GetAPIKeyFromContext(c); ok && apiKey != nil && apiKey.Group != nil {
 		got.Data = filterBatchImageModelsByAllowlist(got.Data, apiKey.Group.ModelAllowlist)
+		ids := make([]string, len(got.Data))
+		byID := make(map[string]service.BatchImagePublicModel, len(got.Data))
+		for i, model := range got.Data {
+			ids[i] = model.ID
+			byID[model.ID] = model
+		}
+		var policies *service.UserModelRestrictionService
+		if h.openAI != nil {
+			policies = h.openAI.userModelRestrictionService
+		}
+		ids = filterUserModelRestrictionIDs(c.Request.Context(), policies, apiKey.UserID, apiKey.Group.Platform, ids)
+		filtered := make([]service.BatchImagePublicModel, 0, len(ids))
+		for _, id := range ids {
+			if model, exists := byID[id]; exists {
+				filtered = append(filtered, model)
+			}
+		}
+		got.Data = filtered
 	}
 	c.JSON(http.StatusOK, got)
 }
@@ -324,6 +342,15 @@ func batchImageError(c *gin.Context, err error) {
 		status = http.StatusNotFound
 		code = "BATCH_IMAGE_NOT_FOUND"
 		message = "batch image job not found"
+	}
+	if errors.Is(err, service.ErrUserModelRestrictionDenied) {
+		status = http.StatusForbidden
+		code = "MODEL_ACCESS_DENIED"
+		message = "Model is not available for this account"
+	} else if errors.Is(err, service.ErrUserModelRestrictionIdentityUnknown) || errors.Is(err, service.ErrUserModelRestrictionUnavailable) {
+		status = http.StatusServiceUnavailable
+		code = "MODEL_ACCESS_POLICY_UNAVAILABLE"
+		message = "Model access policy is temporarily unavailable"
 	}
 	c.JSON(status, gin.H{
 		"error": gin.H{

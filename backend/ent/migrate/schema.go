@@ -1952,6 +1952,46 @@ var (
 			},
 		},
 	}
+	// UserModelRestrictionRulesColumns holds the columns for the "user_model_restriction_rules" table.
+	UserModelRestrictionRulesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "revision", Type: field.TypeInt64},
+		{Name: "rule_id", Type: field.TypeUUID},
+		{Name: "action", Type: field.TypeString, Size: 24, Default: "deny_model"},
+		{Name: "limit_value", Type: field.TypeInt, Nullable: true},
+		{Name: "starts_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "source", Type: field.TypeString, Size: 16, Default: "manual"},
+		{Name: "namespace", Type: field.TypeString, Size: 64},
+		{Name: "canonical_model", Type: field.TypeString, Size: 255},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "expires_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "reason", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "created_by", Type: field.TypeInt64, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "user_id", Type: field.TypeInt64},
+	}
+	// UserModelRestrictionRulesTable holds the schema information for the "user_model_restriction_rules" table.
+	UserModelRestrictionRulesTable = &schema.Table{
+		Name:       "user_model_restriction_rules",
+		Columns:    UserModelRestrictionRulesColumns,
+		PrimaryKey: []*schema.Column{UserModelRestrictionRulesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "user_model_restriction_rules_users_user",
+				Columns:    []*schema.Column{UserModelRestrictionRulesColumns[15]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "uq_user_model_restriction_rules_key",
+				Unique:  true,
+				Columns: []*schema.Column{UserModelRestrictionRulesColumns[15], UserModelRestrictionRulesColumns[1], UserModelRestrictionRulesColumns[7], UserModelRestrictionRulesColumns[8], UserModelRestrictionRulesColumns[3], UserModelRestrictionRulesColumns[6]},
+			},
+		},
+	}
 	// UserPlatformQuotasColumns holds the columns for the "user_platform_quotas" table.
 	UserPlatformQuotasColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2127,6 +2167,7 @@ var (
 		UserAllowedGroupsTable,
 		UserAttributeDefinitionsTable,
 		UserAttributeValuesTable,
+		UserModelRestrictionRulesTable,
 		UserPlatformQuotasTable,
 		UserSubscriptionsTable,
 	}
@@ -2275,6 +2316,10 @@ func init() {
 	UserAttributeValuesTable.ForeignKeys[1].RefTable = UserAttributeDefinitionsTable
 	UserAttributeValuesTable.Annotation = &entsql.Annotation{
 		Table: "user_attribute_values",
+	}
+	UserModelRestrictionRulesTable.ForeignKeys[0].RefTable = UsersTable
+	UserModelRestrictionRulesTable.Annotation = &entsql.Annotation{
+		Table: "user_model_restriction_rules",
 	}
 	UserPlatformQuotasTable.ForeignKeys[0].RefTable = UsersTable
 	UserPlatformQuotasTable.Annotation = &entsql.Annotation{

@@ -179,6 +179,10 @@ func liveCallIdentity(
 
 func (h *OpenAIGatewayHandler) writeLiveCreateError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, service.ErrUserModelRestrictionDenied),
+		errors.Is(err, service.ErrUserModelRestrictionIdentityUnknown),
+		errors.Is(err, service.ErrUserModelRestrictionUnavailable):
+		service.WriteUserModelRestrictionError(c, service.UserModelRestrictionProtocolOpenAI, err)
 	case errors.Is(err, service.ErrLiveConcurrencyFull):
 		h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Live concurrency limit reached")
 	case errors.Is(err, service.ErrLiveUnavailable):

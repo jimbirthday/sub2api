@@ -65,6 +65,8 @@ func ProvideSchedulerCache(rdb *redis.Client, cfg *config.Config) service.Schedu
 
 // ProviderSet is the Wire provider set for all repositories
 var ProviderSet = wire.NewSet(
+	NewDistillationRiskRepository,
+	NewDistillationTelemetryRepository,
 	NewSharedSubscriptionRepository,
 	NewUserRepository,
 	NewAPIKeyRepository,
@@ -108,6 +110,7 @@ var ProviderSet = wire.NewSet(
 	NewAffiliateRepository,
 	NewUserPlatformQuotaRepository,     // T14: user × platform quota
 	NewUserPlatformQuotaServiceAdapter, // T14: adapter → service.UserPlatformQuotaRepository
+	NewUserModelRestrictionRepository,
 
 	// Cache implementations
 	NewGatewayCache,

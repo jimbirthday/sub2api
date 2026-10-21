@@ -34,6 +34,10 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	if err := EnforceUserModelRestriction(ctx, account, upstreamModel); err != nil {
+		WriteUserModelRestrictionError(c, UserModelRestrictionProtocolOpenAI, err)
+		return nil, err
+	}
 	SetOpsUpstreamModel(c, upstreamModel)
 	upstreamBody := body
 	if upstreamModel != originalModel {

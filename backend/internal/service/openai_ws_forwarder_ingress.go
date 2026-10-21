@@ -963,6 +963,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		turnStart := time.Now()
 		wroteDownstream := false
+		UpdateModelExecutionPayload(ctx, payload)
+		if err := EnforceUserModelRestriction(ctx, account, UserModelRestrictionModelsFromPayload(originalModel, payload)...); err != nil {
+			return nil, err
+		}
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",

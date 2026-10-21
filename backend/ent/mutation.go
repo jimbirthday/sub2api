@@ -50,9 +50,11 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
+	"github.com/Wei-Shaw/sub2api/ent/usermodelrestriction"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/google/uuid"
 )
 
 const (
@@ -101,6 +103,7 @@ const (
 	TypeUserAllowedGroup              = "UserAllowedGroup"
 	TypeUserAttributeDefinition       = "UserAttributeDefinition"
 	TypeUserAttributeValue            = "UserAttributeValue"
+	TypeUserModelRestriction          = "UserModelRestriction"
 	TypeUserPlatformQuota             = "UserPlatformQuota"
 	TypeUserSubscription              = "UserSubscription"
 )
@@ -54079,6 +54082,1331 @@ func (m *UserAttributeValueMutation) ResetEdge(name string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown UserAttributeValue edge %s", name)
+}
+
+// UserModelRestrictionMutation represents an operation that mutates the UserModelRestriction nodes in the graph.
+type UserModelRestrictionMutation struct {
+	config
+	op              Op
+	typ             string
+	id              *int64
+	revision        *int64
+	addrevision     *int64
+	rule_id         *uuid.UUID
+	action          *string
+	limit_value     *int
+	addlimit_value  *int
+	starts_at       *time.Time
+	source          *string
+	namespace       *string
+	canonical_model *string
+	enabled         *bool
+	expires_at      *time.Time
+	reason          *string
+	created_by      *int64
+	addcreated_by   *int64
+	created_at      *time.Time
+	updated_at      *time.Time
+	clearedFields   map[string]struct{}
+	user            *int64
+	cleareduser     bool
+	done            bool
+	oldValue        func(context.Context) (*UserModelRestriction, error)
+	predicates      []predicate.UserModelRestriction
+}
+
+var _ ent.Mutation = (*UserModelRestrictionMutation)(nil)
+
+// usermodelrestrictionOption allows management of the mutation configuration using functional options.
+type usermodelrestrictionOption func(*UserModelRestrictionMutation)
+
+// newUserModelRestrictionMutation creates new mutation for the UserModelRestriction entity.
+func newUserModelRestrictionMutation(c config, op Op, opts ...usermodelrestrictionOption) *UserModelRestrictionMutation {
+	m := &UserModelRestrictionMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeUserModelRestriction,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withUserModelRestrictionID sets the ID field of the mutation.
+func withUserModelRestrictionID(id int64) usermodelrestrictionOption {
+	return func(m *UserModelRestrictionMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *UserModelRestriction
+		)
+		m.oldValue = func(ctx context.Context) (*UserModelRestriction, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().UserModelRestriction.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withUserModelRestriction sets the old UserModelRestriction of the mutation.
+func withUserModelRestriction(node *UserModelRestriction) usermodelrestrictionOption {
+	return func(m *UserModelRestrictionMutation) {
+		m.oldValue = func(context.Context) (*UserModelRestriction, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m UserModelRestrictionMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m UserModelRestrictionMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of UserModelRestriction entities.
+func (m *UserModelRestrictionMutation) SetID(id int64) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *UserModelRestrictionMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *UserModelRestrictionMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().UserModelRestriction.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetUserID sets the "user_id" field.
+func (m *UserModelRestrictionMutation) SetUserID(i int64) {
+	m.user = &i
+}
+
+// UserID returns the value of the "user_id" field in the mutation.
+func (m *UserModelRestrictionMutation) UserID() (r int64, exists bool) {
+	v := m.user
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUserID returns the old "user_id" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldUserID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUserID: %w", err)
+	}
+	return oldValue.UserID, nil
+}
+
+// ResetUserID resets all changes to the "user_id" field.
+func (m *UserModelRestrictionMutation) ResetUserID() {
+	m.user = nil
+}
+
+// SetRevision sets the "revision" field.
+func (m *UserModelRestrictionMutation) SetRevision(i int64) {
+	m.revision = &i
+	m.addrevision = nil
+}
+
+// Revision returns the value of the "revision" field in the mutation.
+func (m *UserModelRestrictionMutation) Revision() (r int64, exists bool) {
+	v := m.revision
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRevision returns the old "revision" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldRevision(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRevision is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRevision requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRevision: %w", err)
+	}
+	return oldValue.Revision, nil
+}
+
+// AddRevision adds i to the "revision" field.
+func (m *UserModelRestrictionMutation) AddRevision(i int64) {
+	if m.addrevision != nil {
+		*m.addrevision += i
+	} else {
+		m.addrevision = &i
+	}
+}
+
+// AddedRevision returns the value that was added to the "revision" field in this mutation.
+func (m *UserModelRestrictionMutation) AddedRevision() (r int64, exists bool) {
+	v := m.addrevision
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetRevision resets all changes to the "revision" field.
+func (m *UserModelRestrictionMutation) ResetRevision() {
+	m.revision = nil
+	m.addrevision = nil
+}
+
+// SetRuleID sets the "rule_id" field.
+func (m *UserModelRestrictionMutation) SetRuleID(u uuid.UUID) {
+	m.rule_id = &u
+}
+
+// RuleID returns the value of the "rule_id" field in the mutation.
+func (m *UserModelRestrictionMutation) RuleID() (r uuid.UUID, exists bool) {
+	v := m.rule_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRuleID returns the old "rule_id" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldRuleID(ctx context.Context) (v uuid.UUID, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRuleID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRuleID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRuleID: %w", err)
+	}
+	return oldValue.RuleID, nil
+}
+
+// ResetRuleID resets all changes to the "rule_id" field.
+func (m *UserModelRestrictionMutation) ResetRuleID() {
+	m.rule_id = nil
+}
+
+// SetAction sets the "action" field.
+func (m *UserModelRestrictionMutation) SetAction(s string) {
+	m.action = &s
+}
+
+// Action returns the value of the "action" field in the mutation.
+func (m *UserModelRestrictionMutation) Action() (r string, exists bool) {
+	v := m.action
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAction returns the old "action" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldAction(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAction is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAction requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAction: %w", err)
+	}
+	return oldValue.Action, nil
+}
+
+// ResetAction resets all changes to the "action" field.
+func (m *UserModelRestrictionMutation) ResetAction() {
+	m.action = nil
+}
+
+// SetLimitValue sets the "limit_value" field.
+func (m *UserModelRestrictionMutation) SetLimitValue(i int) {
+	m.limit_value = &i
+	m.addlimit_value = nil
+}
+
+// LimitValue returns the value of the "limit_value" field in the mutation.
+func (m *UserModelRestrictionMutation) LimitValue() (r int, exists bool) {
+	v := m.limit_value
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLimitValue returns the old "limit_value" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldLimitValue(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLimitValue is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLimitValue requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLimitValue: %w", err)
+	}
+	return oldValue.LimitValue, nil
+}
+
+// AddLimitValue adds i to the "limit_value" field.
+func (m *UserModelRestrictionMutation) AddLimitValue(i int) {
+	if m.addlimit_value != nil {
+		*m.addlimit_value += i
+	} else {
+		m.addlimit_value = &i
+	}
+}
+
+// AddedLimitValue returns the value that was added to the "limit_value" field in this mutation.
+func (m *UserModelRestrictionMutation) AddedLimitValue() (r int, exists bool) {
+	v := m.addlimit_value
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearLimitValue clears the value of the "limit_value" field.
+func (m *UserModelRestrictionMutation) ClearLimitValue() {
+	m.limit_value = nil
+	m.addlimit_value = nil
+	m.clearedFields[usermodelrestriction.FieldLimitValue] = struct{}{}
+}
+
+// LimitValueCleared returns if the "limit_value" field was cleared in this mutation.
+func (m *UserModelRestrictionMutation) LimitValueCleared() bool {
+	_, ok := m.clearedFields[usermodelrestriction.FieldLimitValue]
+	return ok
+}
+
+// ResetLimitValue resets all changes to the "limit_value" field.
+func (m *UserModelRestrictionMutation) ResetLimitValue() {
+	m.limit_value = nil
+	m.addlimit_value = nil
+	delete(m.clearedFields, usermodelrestriction.FieldLimitValue)
+}
+
+// SetStartsAt sets the "starts_at" field.
+func (m *UserModelRestrictionMutation) SetStartsAt(t time.Time) {
+	m.starts_at = &t
+}
+
+// StartsAt returns the value of the "starts_at" field in the mutation.
+func (m *UserModelRestrictionMutation) StartsAt() (r time.Time, exists bool) {
+	v := m.starts_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStartsAt returns the old "starts_at" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldStartsAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStartsAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStartsAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStartsAt: %w", err)
+	}
+	return oldValue.StartsAt, nil
+}
+
+// ClearStartsAt clears the value of the "starts_at" field.
+func (m *UserModelRestrictionMutation) ClearStartsAt() {
+	m.starts_at = nil
+	m.clearedFields[usermodelrestriction.FieldStartsAt] = struct{}{}
+}
+
+// StartsAtCleared returns if the "starts_at" field was cleared in this mutation.
+func (m *UserModelRestrictionMutation) StartsAtCleared() bool {
+	_, ok := m.clearedFields[usermodelrestriction.FieldStartsAt]
+	return ok
+}
+
+// ResetStartsAt resets all changes to the "starts_at" field.
+func (m *UserModelRestrictionMutation) ResetStartsAt() {
+	m.starts_at = nil
+	delete(m.clearedFields, usermodelrestriction.FieldStartsAt)
+}
+
+// SetSource sets the "source" field.
+func (m *UserModelRestrictionMutation) SetSource(s string) {
+	m.source = &s
+}
+
+// Source returns the value of the "source" field in the mutation.
+func (m *UserModelRestrictionMutation) Source() (r string, exists bool) {
+	v := m.source
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSource returns the old "source" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldSource(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSource is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSource requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSource: %w", err)
+	}
+	return oldValue.Source, nil
+}
+
+// ResetSource resets all changes to the "source" field.
+func (m *UserModelRestrictionMutation) ResetSource() {
+	m.source = nil
+}
+
+// SetNamespace sets the "namespace" field.
+func (m *UserModelRestrictionMutation) SetNamespace(s string) {
+	m.namespace = &s
+}
+
+// Namespace returns the value of the "namespace" field in the mutation.
+func (m *UserModelRestrictionMutation) Namespace() (r string, exists bool) {
+	v := m.namespace
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldNamespace returns the old "namespace" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldNamespace(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldNamespace is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldNamespace requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldNamespace: %w", err)
+	}
+	return oldValue.Namespace, nil
+}
+
+// ResetNamespace resets all changes to the "namespace" field.
+func (m *UserModelRestrictionMutation) ResetNamespace() {
+	m.namespace = nil
+}
+
+// SetCanonicalModel sets the "canonical_model" field.
+func (m *UserModelRestrictionMutation) SetCanonicalModel(s string) {
+	m.canonical_model = &s
+}
+
+// CanonicalModel returns the value of the "canonical_model" field in the mutation.
+func (m *UserModelRestrictionMutation) CanonicalModel() (r string, exists bool) {
+	v := m.canonical_model
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCanonicalModel returns the old "canonical_model" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldCanonicalModel(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCanonicalModel is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCanonicalModel requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCanonicalModel: %w", err)
+	}
+	return oldValue.CanonicalModel, nil
+}
+
+// ResetCanonicalModel resets all changes to the "canonical_model" field.
+func (m *UserModelRestrictionMutation) ResetCanonicalModel() {
+	m.canonical_model = nil
+}
+
+// SetEnabled sets the "enabled" field.
+func (m *UserModelRestrictionMutation) SetEnabled(b bool) {
+	m.enabled = &b
+}
+
+// Enabled returns the value of the "enabled" field in the mutation.
+func (m *UserModelRestrictionMutation) Enabled() (r bool, exists bool) {
+	v := m.enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEnabled returns the old "enabled" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEnabled: %w", err)
+	}
+	return oldValue.Enabled, nil
+}
+
+// ResetEnabled resets all changes to the "enabled" field.
+func (m *UserModelRestrictionMutation) ResetEnabled() {
+	m.enabled = nil
+}
+
+// SetExpiresAt sets the "expires_at" field.
+func (m *UserModelRestrictionMutation) SetExpiresAt(t time.Time) {
+	m.expires_at = &t
+}
+
+// ExpiresAt returns the value of the "expires_at" field in the mutation.
+func (m *UserModelRestrictionMutation) ExpiresAt() (r time.Time, exists bool) {
+	v := m.expires_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExpiresAt returns the old "expires_at" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldExpiresAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExpiresAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExpiresAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExpiresAt: %w", err)
+	}
+	return oldValue.ExpiresAt, nil
+}
+
+// ClearExpiresAt clears the value of the "expires_at" field.
+func (m *UserModelRestrictionMutation) ClearExpiresAt() {
+	m.expires_at = nil
+	m.clearedFields[usermodelrestriction.FieldExpiresAt] = struct{}{}
+}
+
+// ExpiresAtCleared returns if the "expires_at" field was cleared in this mutation.
+func (m *UserModelRestrictionMutation) ExpiresAtCleared() bool {
+	_, ok := m.clearedFields[usermodelrestriction.FieldExpiresAt]
+	return ok
+}
+
+// ResetExpiresAt resets all changes to the "expires_at" field.
+func (m *UserModelRestrictionMutation) ResetExpiresAt() {
+	m.expires_at = nil
+	delete(m.clearedFields, usermodelrestriction.FieldExpiresAt)
+}
+
+// SetReason sets the "reason" field.
+func (m *UserModelRestrictionMutation) SetReason(s string) {
+	m.reason = &s
+}
+
+// Reason returns the value of the "reason" field in the mutation.
+func (m *UserModelRestrictionMutation) Reason() (r string, exists bool) {
+	v := m.reason
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldReason returns the old "reason" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldReason(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldReason is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldReason requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldReason: %w", err)
+	}
+	return oldValue.Reason, nil
+}
+
+// ResetReason resets all changes to the "reason" field.
+func (m *UserModelRestrictionMutation) ResetReason() {
+	m.reason = nil
+}
+
+// SetCreatedBy sets the "created_by" field.
+func (m *UserModelRestrictionMutation) SetCreatedBy(i int64) {
+	m.created_by = &i
+	m.addcreated_by = nil
+}
+
+// CreatedBy returns the value of the "created_by" field in the mutation.
+func (m *UserModelRestrictionMutation) CreatedBy() (r int64, exists bool) {
+	v := m.created_by
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedBy returns the old "created_by" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldCreatedBy(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedBy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedBy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedBy: %w", err)
+	}
+	return oldValue.CreatedBy, nil
+}
+
+// AddCreatedBy adds i to the "created_by" field.
+func (m *UserModelRestrictionMutation) AddCreatedBy(i int64) {
+	if m.addcreated_by != nil {
+		*m.addcreated_by += i
+	} else {
+		m.addcreated_by = &i
+	}
+}
+
+// AddedCreatedBy returns the value that was added to the "created_by" field in this mutation.
+func (m *UserModelRestrictionMutation) AddedCreatedBy() (r int64, exists bool) {
+	v := m.addcreated_by
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearCreatedBy clears the value of the "created_by" field.
+func (m *UserModelRestrictionMutation) ClearCreatedBy() {
+	m.created_by = nil
+	m.addcreated_by = nil
+	m.clearedFields[usermodelrestriction.FieldCreatedBy] = struct{}{}
+}
+
+// CreatedByCleared returns if the "created_by" field was cleared in this mutation.
+func (m *UserModelRestrictionMutation) CreatedByCleared() bool {
+	_, ok := m.clearedFields[usermodelrestriction.FieldCreatedBy]
+	return ok
+}
+
+// ResetCreatedBy resets all changes to the "created_by" field.
+func (m *UserModelRestrictionMutation) ResetCreatedBy() {
+	m.created_by = nil
+	m.addcreated_by = nil
+	delete(m.clearedFields, usermodelrestriction.FieldCreatedBy)
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *UserModelRestrictionMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *UserModelRestrictionMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *UserModelRestrictionMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *UserModelRestrictionMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *UserModelRestrictionMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the UserModelRestriction entity.
+// If the UserModelRestriction object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserModelRestrictionMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *UserModelRestrictionMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// ClearUser clears the "user" edge to the User entity.
+func (m *UserModelRestrictionMutation) ClearUser() {
+	m.cleareduser = true
+	m.clearedFields[usermodelrestriction.FieldUserID] = struct{}{}
+}
+
+// UserCleared reports if the "user" edge to the User entity was cleared.
+func (m *UserModelRestrictionMutation) UserCleared() bool {
+	return m.cleareduser
+}
+
+// UserIDs returns the "user" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// UserID instead. It exists only for internal usage by the builders.
+func (m *UserModelRestrictionMutation) UserIDs() (ids []int64) {
+	if id := m.user; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetUser resets all changes to the "user" edge.
+func (m *UserModelRestrictionMutation) ResetUser() {
+	m.user = nil
+	m.cleareduser = false
+}
+
+// Where appends a list predicates to the UserModelRestrictionMutation builder.
+func (m *UserModelRestrictionMutation) Where(ps ...predicate.UserModelRestriction) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the UserModelRestrictionMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *UserModelRestrictionMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.UserModelRestriction, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *UserModelRestrictionMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *UserModelRestrictionMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (UserModelRestriction).
+func (m *UserModelRestrictionMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *UserModelRestrictionMutation) Fields() []string {
+	fields := make([]string, 0, 15)
+	if m.user != nil {
+		fields = append(fields, usermodelrestriction.FieldUserID)
+	}
+	if m.revision != nil {
+		fields = append(fields, usermodelrestriction.FieldRevision)
+	}
+	if m.rule_id != nil {
+		fields = append(fields, usermodelrestriction.FieldRuleID)
+	}
+	if m.action != nil {
+		fields = append(fields, usermodelrestriction.FieldAction)
+	}
+	if m.limit_value != nil {
+		fields = append(fields, usermodelrestriction.FieldLimitValue)
+	}
+	if m.starts_at != nil {
+		fields = append(fields, usermodelrestriction.FieldStartsAt)
+	}
+	if m.source != nil {
+		fields = append(fields, usermodelrestriction.FieldSource)
+	}
+	if m.namespace != nil {
+		fields = append(fields, usermodelrestriction.FieldNamespace)
+	}
+	if m.canonical_model != nil {
+		fields = append(fields, usermodelrestriction.FieldCanonicalModel)
+	}
+	if m.enabled != nil {
+		fields = append(fields, usermodelrestriction.FieldEnabled)
+	}
+	if m.expires_at != nil {
+		fields = append(fields, usermodelrestriction.FieldExpiresAt)
+	}
+	if m.reason != nil {
+		fields = append(fields, usermodelrestriction.FieldReason)
+	}
+	if m.created_by != nil {
+		fields = append(fields, usermodelrestriction.FieldCreatedBy)
+	}
+	if m.created_at != nil {
+		fields = append(fields, usermodelrestriction.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, usermodelrestriction.FieldUpdatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *UserModelRestrictionMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case usermodelrestriction.FieldUserID:
+		return m.UserID()
+	case usermodelrestriction.FieldRevision:
+		return m.Revision()
+	case usermodelrestriction.FieldRuleID:
+		return m.RuleID()
+	case usermodelrestriction.FieldAction:
+		return m.Action()
+	case usermodelrestriction.FieldLimitValue:
+		return m.LimitValue()
+	case usermodelrestriction.FieldStartsAt:
+		return m.StartsAt()
+	case usermodelrestriction.FieldSource:
+		return m.Source()
+	case usermodelrestriction.FieldNamespace:
+		return m.Namespace()
+	case usermodelrestriction.FieldCanonicalModel:
+		return m.CanonicalModel()
+	case usermodelrestriction.FieldEnabled:
+		return m.Enabled()
+	case usermodelrestriction.FieldExpiresAt:
+		return m.ExpiresAt()
+	case usermodelrestriction.FieldReason:
+		return m.Reason()
+	case usermodelrestriction.FieldCreatedBy:
+		return m.CreatedBy()
+	case usermodelrestriction.FieldCreatedAt:
+		return m.CreatedAt()
+	case usermodelrestriction.FieldUpdatedAt:
+		return m.UpdatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *UserModelRestrictionMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case usermodelrestriction.FieldUserID:
+		return m.OldUserID(ctx)
+	case usermodelrestriction.FieldRevision:
+		return m.OldRevision(ctx)
+	case usermodelrestriction.FieldRuleID:
+		return m.OldRuleID(ctx)
+	case usermodelrestriction.FieldAction:
+		return m.OldAction(ctx)
+	case usermodelrestriction.FieldLimitValue:
+		return m.OldLimitValue(ctx)
+	case usermodelrestriction.FieldStartsAt:
+		return m.OldStartsAt(ctx)
+	case usermodelrestriction.FieldSource:
+		return m.OldSource(ctx)
+	case usermodelrestriction.FieldNamespace:
+		return m.OldNamespace(ctx)
+	case usermodelrestriction.FieldCanonicalModel:
+		return m.OldCanonicalModel(ctx)
+	case usermodelrestriction.FieldEnabled:
+		return m.OldEnabled(ctx)
+	case usermodelrestriction.FieldExpiresAt:
+		return m.OldExpiresAt(ctx)
+	case usermodelrestriction.FieldReason:
+		return m.OldReason(ctx)
+	case usermodelrestriction.FieldCreatedBy:
+		return m.OldCreatedBy(ctx)
+	case usermodelrestriction.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case usermodelrestriction.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown UserModelRestriction field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UserModelRestrictionMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case usermodelrestriction.FieldUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUserID(v)
+		return nil
+	case usermodelrestriction.FieldRevision:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRevision(v)
+		return nil
+	case usermodelrestriction.FieldRuleID:
+		v, ok := value.(uuid.UUID)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRuleID(v)
+		return nil
+	case usermodelrestriction.FieldAction:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAction(v)
+		return nil
+	case usermodelrestriction.FieldLimitValue:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLimitValue(v)
+		return nil
+	case usermodelrestriction.FieldStartsAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStartsAt(v)
+		return nil
+	case usermodelrestriction.FieldSource:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSource(v)
+		return nil
+	case usermodelrestriction.FieldNamespace:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetNamespace(v)
+		return nil
+	case usermodelrestriction.FieldCanonicalModel:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCanonicalModel(v)
+		return nil
+	case usermodelrestriction.FieldEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEnabled(v)
+		return nil
+	case usermodelrestriction.FieldExpiresAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExpiresAt(v)
+		return nil
+	case usermodelrestriction.FieldReason:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetReason(v)
+		return nil
+	case usermodelrestriction.FieldCreatedBy:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedBy(v)
+		return nil
+	case usermodelrestriction.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case usermodelrestriction.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown UserModelRestriction field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *UserModelRestrictionMutation) AddedFields() []string {
+	var fields []string
+	if m.addrevision != nil {
+		fields = append(fields, usermodelrestriction.FieldRevision)
+	}
+	if m.addlimit_value != nil {
+		fields = append(fields, usermodelrestriction.FieldLimitValue)
+	}
+	if m.addcreated_by != nil {
+		fields = append(fields, usermodelrestriction.FieldCreatedBy)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *UserModelRestrictionMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case usermodelrestriction.FieldRevision:
+		return m.AddedRevision()
+	case usermodelrestriction.FieldLimitValue:
+		return m.AddedLimitValue()
+	case usermodelrestriction.FieldCreatedBy:
+		return m.AddedCreatedBy()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UserModelRestrictionMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case usermodelrestriction.FieldRevision:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRevision(v)
+		return nil
+	case usermodelrestriction.FieldLimitValue:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddLimitValue(v)
+		return nil
+	case usermodelrestriction.FieldCreatedBy:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddCreatedBy(v)
+		return nil
+	}
+	return fmt.Errorf("unknown UserModelRestriction numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *UserModelRestrictionMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(usermodelrestriction.FieldLimitValue) {
+		fields = append(fields, usermodelrestriction.FieldLimitValue)
+	}
+	if m.FieldCleared(usermodelrestriction.FieldStartsAt) {
+		fields = append(fields, usermodelrestriction.FieldStartsAt)
+	}
+	if m.FieldCleared(usermodelrestriction.FieldExpiresAt) {
+		fields = append(fields, usermodelrestriction.FieldExpiresAt)
+	}
+	if m.FieldCleared(usermodelrestriction.FieldCreatedBy) {
+		fields = append(fields, usermodelrestriction.FieldCreatedBy)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *UserModelRestrictionMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *UserModelRestrictionMutation) ClearField(name string) error {
+	switch name {
+	case usermodelrestriction.FieldLimitValue:
+		m.ClearLimitValue()
+		return nil
+	case usermodelrestriction.FieldStartsAt:
+		m.ClearStartsAt()
+		return nil
+	case usermodelrestriction.FieldExpiresAt:
+		m.ClearExpiresAt()
+		return nil
+	case usermodelrestriction.FieldCreatedBy:
+		m.ClearCreatedBy()
+		return nil
+	}
+	return fmt.Errorf("unknown UserModelRestriction nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *UserModelRestrictionMutation) ResetField(name string) error {
+	switch name {
+	case usermodelrestriction.FieldUserID:
+		m.ResetUserID()
+		return nil
+	case usermodelrestriction.FieldRevision:
+		m.ResetRevision()
+		return nil
+	case usermodelrestriction.FieldRuleID:
+		m.ResetRuleID()
+		return nil
+	case usermodelrestriction.FieldAction:
+		m.ResetAction()
+		return nil
+	case usermodelrestriction.FieldLimitValue:
+		m.ResetLimitValue()
+		return nil
+	case usermodelrestriction.FieldStartsAt:
+		m.ResetStartsAt()
+		return nil
+	case usermodelrestriction.FieldSource:
+		m.ResetSource()
+		return nil
+	case usermodelrestriction.FieldNamespace:
+		m.ResetNamespace()
+		return nil
+	case usermodelrestriction.FieldCanonicalModel:
+		m.ResetCanonicalModel()
+		return nil
+	case usermodelrestriction.FieldEnabled:
+		m.ResetEnabled()
+		return nil
+	case usermodelrestriction.FieldExpiresAt:
+		m.ResetExpiresAt()
+		return nil
+	case usermodelrestriction.FieldReason:
+		m.ResetReason()
+		return nil
+	case usermodelrestriction.FieldCreatedBy:
+		m.ResetCreatedBy()
+		return nil
+	case usermodelrestriction.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case usermodelrestriction.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown UserModelRestriction field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *UserModelRestrictionMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.user != nil {
+		edges = append(edges, usermodelrestriction.EdgeUser)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *UserModelRestrictionMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case usermodelrestriction.EdgeUser:
+		if id := m.user; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *UserModelRestrictionMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *UserModelRestrictionMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *UserModelRestrictionMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.cleareduser {
+		edges = append(edges, usermodelrestriction.EdgeUser)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *UserModelRestrictionMutation) EdgeCleared(name string) bool {
+	switch name {
+	case usermodelrestriction.EdgeUser:
+		return m.cleareduser
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *UserModelRestrictionMutation) ClearEdge(name string) error {
+	switch name {
+	case usermodelrestriction.EdgeUser:
+		m.ClearUser()
+		return nil
+	}
+	return fmt.Errorf("unknown UserModelRestriction unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *UserModelRestrictionMutation) ResetEdge(name string) error {
+	switch name {
+	case usermodelrestriction.EdgeUser:
+		m.ResetUser()
+		return nil
+	}
+	return fmt.Errorf("unknown UserModelRestriction edge %s", name)
 }
 
 // UserPlatformQuotaMutation represents an operation that mutates the UserPlatformQuota nodes in the graph.

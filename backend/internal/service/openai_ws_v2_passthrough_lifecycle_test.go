@@ -350,7 +350,8 @@ func TestPassthroughLifecycle_CyberTerminalEventsMarkBeforeAfterTurn(t *testing.
 			}
 			require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
 			select {
-			case <-serverErr:
+			case serverExitErr := <-serverErr:
+				_ = serverExitErr // The client/control cancellation above intentionally ends the server loop.
 			case <-time.After(3 * time.Second):
 				t.Fatal("cyber passthrough test did not exit")
 			}

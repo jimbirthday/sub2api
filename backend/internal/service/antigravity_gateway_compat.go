@@ -190,6 +190,7 @@ func (s *AntigravityGatewayService) forwardAntigravityCompat(
 		accountRepo:     s.accountRepo,
 		handleError:     s.handleUpstreamError,
 		requestedModel:  request.originalModel,
+		upstreamModel:   call.billingModel,
 		isStickySession: false,
 		groupID:         0,
 		sessionHash:     "",

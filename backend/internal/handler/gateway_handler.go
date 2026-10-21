@@ -53,14 +53,24 @@ type GatewayHandler struct {
 	contentModerationService  *service.ContentModerationService
 	securityAuditCoordinator  *securityaudit.Coordinator
 	// geminiCachedContentService 管理 Gemini 显式缓存；为 nil 时相关接口不可用。
-	geminiCachedContentService *service.GeminiCachedContentService
-	concurrencyHelper          *ConcurrencyHelper
-	userMsgQueueHelper         *UserMsgQueueHelper
-	maxAccountSwitches         int
-	maxAccountSwitchesGemini   int
-	cfg                        *config.Config
-	settingService             *service.SettingService
-	promptInjectionService     *service.PromptInjectionService
+	geminiCachedContentService   *service.GeminiCachedContentService
+	concurrencyHelper            *ConcurrencyHelper
+	userMsgQueueHelper           *UserMsgQueueHelper
+	maxAccountSwitches           int
+	maxAccountSwitchesGemini     int
+	cfg                          *config.Config
+	settingService               *service.SettingService
+	promptInjectionService       *service.PromptInjectionService
+	userModelRestrictionService  *service.UserModelRestrictionService
+	distillationTelemetryService *service.DistillationTelemetryService
+}
+
+func (h *GatewayHandler) SetUserModelRestrictionService(s *service.UserModelRestrictionService) {
+	h.userModelRestrictionService = s
+}
+
+func (h *GatewayHandler) SetDistillationTelemetryService(s *service.DistillationTelemetryService) {
+	h.distillationTelemetryService = s
 }
 
 // NewGatewayHandler creates a new GatewayHandler
@@ -1180,6 +1190,12 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	if forcedPlatform, ok := middleware2.GetForcePlatformFromContext(c); ok && strings.TrimSpace(forcedPlatform) != "" {
 		platform = forcedPlatform
 	}
+	filterRestricted := func(modelIDs []string) []string {
+		if apiKey == nil {
+			return modelIDs
+		}
+		return filterUserModelRestrictionIDs(c.Request.Context(), h.userModelRestrictionService, apiKey.UserID, platform, modelIDs)
+	}
 
 	if platform == service.PlatformOpenAI && apiKey != nil && apiKey.Group != nil &&
 		apiKey.Group.Platform == service.PlatformOpenAI && apiKey.Group.CodexModelsManifestConfig.Enabled {
@@ -1194,14 +1210,14 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 			if len(source) == 0 {
 				source = defaultModelIDsForPlatform(service.PlatformComposite)
 			}
-			writeAllowlistedModelsList(c, service.PlatformComposite, apiKey.Group.ModelAllowlist.FilterForListing(source))
+			writeAllowlistedModelsList(c, service.PlatformComposite, filterRestricted(apiKey.Group.ModelAllowlist.FilterForListing(source)))
 			return
 		}
 		if len(availableModels) > 0 {
-			writeModelsList(c, service.PlatformComposite, availableModels)
+			writeModelsList(c, service.PlatformComposite, filterRestricted(availableModels))
 			return
 		}
-		writeModelsList(c, service.PlatformComposite, defaultModelIDsForPlatform(service.PlatformComposite))
+		writeModelsList(c, service.PlatformComposite, filterRestricted(defaultModelIDsForPlatform(service.PlatformComposite)))
 		return
 	}
 
@@ -1209,35 +1225,35 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
 		source := modelListingSource(platform, availableModels, defaultModelIDsForPlatform(platform))
-		writeAllowlistedModelsList(c, platform, apiKey.Group.ModelAllowlist.FilterForListing(source))
+		writeAllowlistedModelsList(c, platform, filterRestricted(apiKey.Group.ModelAllowlist.FilterForListing(source)))
 		return
 	}
 
 	if len(availableModels) > 0 || (platform == service.PlatformOpenAI && availableModels != nil) {
-		writeModelsList(c, platform, availableModels)
+		writeModelsList(c, platform, filterRestricted(availableModels))
 		return
 	}
 
 	// Fallback to default models
 	if platform == service.PlatformOpenAI {
-		writeModelsListResponse(c, openai.DefaultModels)
+		writeOpenAIModelsList(c, filterRestricted(defaultModelIDsForPlatform(platform)))
 		return
 	}
 
 	if platform == service.PlatformGemini {
-		writeModelsListResponse(c, geminicli.DefaultModels)
+		writeModelsList(c, platform, filterRestricted(defaultModelIDsForPlatform(platform)))
 		return
 	}
 	if platform == service.PlatformGrok {
-		writeGrokModelsList(c, xai.DefaultModelIDs())
+		writeGrokModelsList(c, filterRestricted(xai.DefaultModelIDs()))
 		return
 	}
 	if platform == service.PlatformTypeSafe {
-		writeModelsList(c, platform, []string{typesafe.JevLatestModel})
+		writeModelsList(c, platform, filterRestricted([]string{typesafe.JevLatestModel}))
 		return
 	}
 
-	writeModelsListResponse(c, claude.DefaultModels)
+	writeModelsList(c, platform, filterRestricted(defaultModelIDsForPlatform(platform)))
 }
 
 // CodexModels returns the effective group model list using the manifest shape
@@ -1256,6 +1272,11 @@ func (h *GatewayHandler) CodexModels(c *gin.Context) {
 	}
 	modelIDs := h.codexModelIDsForGroup(c.Request.Context(), apiKey.Group, forcedPlatform)
 	modelIDs = service.FilterCodexModelIDsForGroup(modelIDs, apiKey.Group)
+	listingPlatform := forcedPlatform
+	if listingPlatform == "" {
+		listingPlatform = apiKey.Group.Platform
+	}
+	modelIDs = filterUserModelRestrictionIDs(c.Request.Context(), h.userModelRestrictionService, apiKey.UserID, listingPlatform, modelIDs)
 	body, err := h.gatewayService.BuildCodexModelsManifestForGroup(
 		c.Request.Context(),
 		apiKey.Group,
@@ -1577,10 +1598,27 @@ func mergeModelIDs(primary, secondary []string) []string {
 // 分组级模型白名单开启时按白名单过滤。
 func (h *GatewayHandler) AntigravityModels(c *gin.Context) {
 	models := antigravity.DefaultModels()
-	if apiKey, ok := middleware2.GetAPIKeyFromContext(c); ok && apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
+	apiKey, _ := middleware2.GetAPIKeyFromContext(c)
+	if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
 		filtered := make([]antigravity.ClaudeModel, 0, len(models))
 		for _, model := range models {
 			if apiKey.Group.ModelAllowlist.Allows(model.ID) {
+				filtered = append(filtered, model)
+			}
+		}
+		models = filtered
+	}
+	if apiKey != nil {
+		ids := make([]string, len(models))
+		byID := make(map[string]antigravity.ClaudeModel, len(models))
+		for i, model := range models {
+			ids[i] = model.ID
+			byID[model.ID] = model
+		}
+		ids = filterUserModelRestrictionIDs(c.Request.Context(), h.userModelRestrictionService, apiKey.UserID, service.PlatformAntigravity, ids)
+		filtered := make([]antigravity.ClaudeModel, 0, len(ids))
+		for _, id := range ids {
+			if model, ok := byID[id]; ok {
 				filtered = append(filtered, model)
 			}
 		}

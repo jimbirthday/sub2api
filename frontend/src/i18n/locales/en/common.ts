@@ -1,5 +1,6 @@
 export default {
   common: {
+    pagination: 'Pagination',
     loading: 'Loading...',
     submitting: 'Submitting...',
     justNow: 'just now',
@@ -210,6 +211,8 @@ export default {
     channelMonitor: 'Channel Monitor',
     channelStatus: 'Channel Status',
     riskControl: 'Risk Control',
+    modelBans: 'Model access',
+    distillationRisk: 'Behavior risk',
     securityAudit: 'Security Audit',
     contentModeration: 'Content Moderation',
     promptAudit: 'Prompt Audit',

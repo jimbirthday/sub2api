@@ -119,6 +119,7 @@ type BillingCacheService struct {
 	cfg                   *config.Config
 	circuitBreaker        *billingCircuitBreaker
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+	distillationRisk      *DistillationRiskService
 
 	cacheWriteChan     chan cacheWriteTask
 	cacheWriteWg       sync.WaitGroup
@@ -132,6 +133,12 @@ type BillingCacheService struct {
 	cacheWriteDropFullLastLog   int64
 	cacheWriteDropClosedCount   uint64
 	cacheWriteDropClosedLastLog int64
+}
+
+func (s *BillingCacheService) SetDistillationRiskService(risk *DistillationRiskService) {
+	if s != nil {
+		s.distillationRisk = risk
+	}
 }
 
 // NewBillingCacheService 创建计费缓存服务
@@ -1004,7 +1011,16 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 	}
 
 	// ── 第二层：用户级全局硬上限（始终生效） ──
-	if user.RPMLimit > 0 {
+	effectiveUserRPM := user.RPMLimit
+	if s.distillationRisk != nil {
+		_, effective, err := s.distillationRisk.EffectiveLimits(ctx, user.ID, 0, effectiveUserRPM, time.Now().UTC())
+		if err != nil {
+			logger.LegacyPrintf("service.billing_cache", "Warning: behavior restriction lookup failed for user=%d: %v", user.ID, err)
+		} else {
+			effectiveUserRPM = effective
+		}
+	}
+	if effectiveUserRPM > 0 {
 		count, err := s.userRPMCache.IncrementUserRPM(ctx, user.ID)
 		if err != nil {
 			logger.LegacyPrintf(
@@ -1014,7 +1030,7 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 			)
 			return nil // fail-open
 		}
-		if count > user.RPMLimit {
+		if count > effectiveUserRPM {
 			return ErrUserRPMExceeded
 		}
 	}

@@ -3073,7 +3073,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	if tc.group != nil {
 		apiKey.Group = tc.group
 	}
-	authorityRepo := configureWSAuthoritativeKey(h, apiKey, cfg)
+	var authorityRepo *wsAuthoritativeKeyRepo
+	if tc.apiKeyService == nil {
+		authorityRepo = configureWSAuthoritativeKey(h, apiKey, cfg)
+	}
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)

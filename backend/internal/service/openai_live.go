@@ -176,6 +176,15 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 		}
 
 		account := selection.Account
+		model := strings.TrimSpace(gjson.GetBytes(request.Session, "model").String())
+		if model == "" {
+			model = "gpt-live"
+		}
+		UpdateModelExecutionPayload(ctx, request.Session)
+		if policyErr := EnforceUserModelRestrictionWithoutBudget(ctx, account, UserModelRestrictionModelsFromPayload(model, request.Session)...); policyErr != nil {
+			selection.ReleaseFunc()
+			return nil, policyErr
+		}
 		leaseID := generateRequestID()
 		acquired, acquireErr := liveCache.AcquireLiveLease(
 			ctx,
@@ -208,11 +217,9 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 		}
 
 		now := time.Now()
-		model := strings.TrimSpace(gjson.GetBytes(request.Session, "model").String())
-		if model == "" {
-			model = "gpt-live"
-		}
 		record := &LiveCallRecord{
+			ExecutionOperationID:  ModelExecutionOperationID(ctx),
+			ExecutionContext:      CarryModelExecutionBudget(ctx, context.Background()),
 			CallID:                created.CallID,
 			CallHash:              hashLiveCallID(created.CallID),
 			AccountID:             account.ID,
@@ -304,6 +311,14 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	upstreamReq.Header.Set(liveAttestationHeader, attestation)
 	applyLiveUpstreamIdentityHeaders(upstreamReq.Header)
 
+	model := strings.TrimSpace(gjson.GetBytes(request.Session, "model").String())
+	if model == "" {
+		model = "gpt-live"
+	}
+	UpdateModelExecutionPayload(ctx, body)
+	if err := EnforceUserModelRestriction(ctx, account, UserModelRestrictionModelsFromPayload(model, body)...); err != nil {
+		return nil, err
+	}
 	resp, err := s.doOpenAIUpstream(upstreamReq, resolveAccountProxyURL(account), account)
 	if err != nil {
 		logLiveCreateStageFailure(ctx, account.ID, "upstream_transport", err)
@@ -329,6 +344,8 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	if err != nil {
 		return nil, err
 	}
+	// HTTP creation success does not prove the remote media session ended.
+	CompleteModelExecution(ctx, false)
 	return &LiveCallCreated{
 		SDP:      responseBody,
 		CallID:   callID,
@@ -561,6 +578,9 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 	runErr := s.runLiveController(proxyCtx, record, upstream, errCh)
 	cancel()
 	_, _ = store.ReleaseLiveController(context.Background(), record.CallHash, owner)
+	if errors.Is(runErr, ErrLiveCallNotFound) {
+		s.confirmLiveExecutionTerminated(record)
+	}
 	if liveSessionEnded(runErr) || !time.Now().Before(record.ExpiresAt) {
 		s.finalizeLiveCall(record)
 		return runErr
@@ -649,6 +669,7 @@ func (s *OpenAIGatewayService) observeLiveCall(record *LiveCallRecord) {
 			continue
 		}
 		storeErrStreak = 0
+		latest.ExecutionContext = record.ExecutionContext
 		record = latest
 		if record.Controller != LiveControllerObserver {
 			return
@@ -670,6 +691,9 @@ func (s *OpenAIGatewayService) observeLiveCall(record *LiveCallRecord) {
 			return
 		}
 		if liveSessionEnded(runErr) {
+			if errors.Is(runErr, ErrLiveCallNotFound) {
+				s.confirmLiveExecutionTerminated(record)
+			}
 			s.finalizeLiveCall(record)
 			return
 		}
@@ -851,4 +875,18 @@ func (s *OpenAIGatewayService) finalizeLiveCall(record *LiveCallRecord) {
 		UpstreamEndpoint: &upstreamEndpoint,
 		CreatedAt:        record.CreatedAt,
 	}, "service.openai_live")
+}
+
+func (s *OpenAIGatewayService) confirmLiveExecutionTerminated(record *LiveCallRecord) {
+	if record == nil || record.ExecutionOperationID == "" {
+		return
+	}
+	if s.liveExecutionTelemetry != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.liveExecutionTelemetry.ConfirmExecutionOperationTerminated(ctx, record.UserID, record.ExecutionOperationID); err != nil {
+			return
+		}
+	}
+	CompleteConfirmedLiveExecution(record.ExecutionContext)
 }

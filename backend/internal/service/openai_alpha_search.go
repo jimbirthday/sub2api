@@ -48,6 +48,11 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 		return nil, fmt.Errorf("sanitize alpha search request body: %w", err)
 	}
 	body = sanitizedBody
+	UpdateModelExecutionPayload(ctx, body)
+	if policyErr := EnforceUserModelRestriction(ctx, account, UserModelRestrictionModelsFromPayload(upstreamModel, body)...); policyErr != nil {
+		WriteUserModelRestrictionError(c, UserModelRestrictionProtocolOpenAI, policyErr)
+		return nil, nil
+	}
 
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {

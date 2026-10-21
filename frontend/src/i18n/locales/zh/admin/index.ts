@@ -8,6 +8,8 @@ import audit from './audit'
 import promptAudit from './promptAudit'
 import plugins from './plugins'
 import promptInjection from './promptInjection'
+import modelBans from './modelBans'
+import distillationRisk from './distillationRisk'
 
 export default {
   ...overview,
@@ -20,4 +22,6 @@ export default {
   ...promptAudit,
   ...plugins,
   ...promptInjection,
+  ...modelBans,
+  ...distillationRisk,
 }

@@ -84,6 +84,12 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 	// 2. Resolve model mapping (same as ForwardAsChatCompletions)
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	UpdateModelExecutionPayload(ctx, body)
+	ctx = WithModelIdentityContext(ctx, "chat_completions", "", "")
+	if err := EnforceUserModelRestriction(ctx, account, UserModelRestrictionModelsFromPayload(upstreamModel, body)...); err != nil {
+		WriteUserModelRestrictionError(c, UserModelRestrictionProtocolOpenAI, err)
+		return nil, err
+	}
 	if err := validateGPT61SolCompatRequest(body, upstreamModel); err != nil {
 		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err

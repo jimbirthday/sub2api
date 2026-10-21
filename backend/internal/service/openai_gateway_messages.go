@@ -67,6 +67,11 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// ShouldUseResponsesAPI：Anthropic 协议账号经 probe 落标
 	// openai_responses_supported=false，否则会命中 CC 直转。
 	routingModel := upstreamRoutingModel(account, body, defaultMappedModel)
+	UpdateModelExecutionPayload(ctx, body)
+	if err := EnforceUserModelRestrictionWithoutBudget(ctx, account, UserModelRestrictionModelsFromPayload(routingModel, body)...); err != nil {
+		WriteUserModelRestrictionError(c, UserModelRestrictionProtocolAnthropic, err)
+		return nil, err
+	}
 	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
 		return nil, writeOpenCodeUnsupportedModelError(c, true, routingModel)
 	}
@@ -98,6 +103,11 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// 2. Model mapping
 	billingModel := resolveOpenAIForwardModel(account, normalizedModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	UpdateModelExecutionPayload(ctx, body)
+	if err := EnforceUserModelRestriction(ctx, account, UserModelRestrictionModelsFromPayload(upstreamModel, body)...); err != nil {
+		WriteUserModelRestrictionError(c, UserModelRestrictionProtocolAnthropic, err)
+		return nil, err
+	}
 	if err := validateGPT61SolCompatRequest(body, upstreamModel); err != nil {
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err

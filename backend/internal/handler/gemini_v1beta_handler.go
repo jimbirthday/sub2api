@@ -42,6 +42,10 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 	// 检查平台：优先使用强制平台（/antigravity 路由），否则要求 gemini 分组（composite 分组允许路由到 antigravity）
 	forcePlatform, hasForcePlatform := middleware.GetForcePlatformFromContext(c)
 	effectivePlatform := effectiveAPIKeyPlatform(c, apiKey)
+	listingPlatform := effectivePlatform
+	if hasForcePlatform && strings.TrimSpace(forcePlatform) != "" {
+		listingPlatform = forcePlatform
+	}
 	if !hasForcePlatform && effectivePlatform != service.PlatformGemini &&
 		!servesCompositeAntigravityGemini(apiKey, effectivePlatform) {
 		googleError(c, http.StatusBadRequest, "API key group platform is not gemini")
@@ -50,16 +54,29 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 
 	// 分组级模型白名单开启时过滤 models[].name（名字形如 models/xxx）。
 	filterGeminiModels := func(models []gemini.Model) []gemini.Model {
-		if apiKey.Group == nil || !apiKey.Group.ModelAllowlistEnabled() {
-			return models
-		}
-		filtered := make([]gemini.Model, 0, len(models))
-		for _, model := range models {
-			if apiKey.Group.ModelAllowlist.Allows(model.Name) {
-				filtered = append(filtered, model)
+		filtered := models
+		if apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
+			filtered = make([]gemini.Model, 0, len(models))
+			for _, model := range models {
+				if apiKey.Group.ModelAllowlist.Allows(model.Name) {
+					filtered = append(filtered, model)
+				}
 			}
 		}
-		return filtered
+		ids := make([]string, len(filtered))
+		byID := make(map[string]gemini.Model, len(filtered))
+		for i, model := range filtered {
+			ids[i] = model.Name
+			byID[model.Name] = model
+		}
+		ids = filterUserModelRestrictionIDs(c.Request.Context(), h.userModelRestrictionService, apiKey.UserID, listingPlatform, ids)
+		result := make([]gemini.Model, 0, len(ids))
+		for _, id := range ids {
+			if model, ok := byID[id]; ok {
+				result = append(result, model)
+			}
+		}
+		return result
 	}
 
 	agModelIDs, err := h.geminiCompatService.AntigravityGeminiModelIDs(c.Request.Context(), apiKey.GroupID, forcePlatform != service.PlatformAntigravity)
@@ -108,6 +125,9 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 			// 统一经 writeUpstreamResponse 写出（保留全部上游响应头）。
 			res.Body = filtered
 		}
+	}
+	if filtered, dropped, ok := filterUpstreamGeminiModelsBodyByUser(c.Request.Context(), res.Body, h.userModelRestrictionService, apiKey.UserID, listingPlatform); ok && dropped {
+		res.Body = filtered
 	}
 	writeUpstreamResponse(c, res)
 }
@@ -215,6 +235,52 @@ func filterUpstreamGeminiModelsBody(body []byte, allowlist service.GroupModelAll
 		return nil, false, false
 	}
 	return merged, true, true
+}
+
+func filterUpstreamGeminiModelsBodyByUser(ctx context.Context, body []byte, policies *service.UserModelRestrictionService, userID int64, platform string) (filtered []byte, dropped bool, ok bool) {
+	if policies == nil || userID <= 0 {
+		return body, false, true
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, false, false
+	}
+	rawModels, exists := envelope["models"]
+	if !exists {
+		return body, false, true
+	}
+	var models []json.RawMessage
+	if err := json.Unmarshal(rawModels, &models); err != nil {
+		return nil, false, false
+	}
+	ids := make([]string, len(models))
+	for i, raw := range models {
+		var model struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(raw, &model); err != nil {
+			return nil, false, false
+		}
+		ids[i] = model.Name
+	}
+	allowedIDs := filterUserModelRestrictionIDs(ctx, policies, userID, platform, ids)
+	counts := make(map[string]int, len(allowedIDs))
+	for _, id := range allowedIDs {
+		counts[id]++
+	}
+	kept := make([]json.RawMessage, 0, len(allowedIDs))
+	for i, raw := range models {
+		if counts[ids[i]] > 0 {
+			kept = append(kept, raw)
+			counts[ids[i]]--
+		}
+	}
+	if len(kept) == len(models) {
+		return body, false, true
+	}
+	envelope["models"], _ = json.Marshal(kept)
+	merged, err := json.Marshal(envelope)
+	return merged, true, err == nil
 }
 
 // GeminiV1BetaGetModel proxies:

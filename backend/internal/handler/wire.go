@@ -11,6 +11,8 @@ import (
 
 // ProvideAdminHandlers creates the AdminHandlers struct
 func ProvideAdminHandlers(
+	distillationRiskHandler *admin.DistillationRiskHandler,
+	userModelRestrictionHandler *admin.UserModelRestrictionHandler,
 	dashboardHandler *admin.DashboardHandler,
 	userHandler *admin.UserHandler,
 	groupHandler *admin.GroupHandler,
@@ -57,6 +59,8 @@ func ProvideAdminHandlers(
 	accountHandler.SetOpenCodeGoUsageService(opencodeGoUsage)
 	accountHandler.SetClaudeResetCreditService(claudeResetCredits)
 	return &AdminHandlers{
+		DistillationRisk:       distillationRiskHandler,
+		UserModelRestriction:   userModelRestrictionHandler,
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,
 		Group:                  groupHandler,
@@ -114,12 +118,16 @@ func ProvideGatewayHandler(
 	settingService *service.SettingService,
 	coordinator *securityaudit.Coordinator,
 	geminiCachedContentService *service.GeminiCachedContentService,
+	userModelRestrictionService *service.UserModelRestrictionService,
+	distillationTelemetryService *service.DistillationTelemetryService,
 ) *GatewayHandler {
 	h := NewGatewayHandler(gatewayService, openAIGatewayService, geminiCompatService, antigravityGatewayService,
 		userService, concurrencyService, billingCacheService, usageService, apiKeyService, usageRecordWorkerPool,
 		errorPassthroughService, contentModerationService, userMsgQueueService, cfg, settingService)
 	h.securityAuditCoordinator = coordinator
 	h.geminiCachedContentService = geminiCachedContentService
+	h.SetUserModelRestrictionService(userModelRestrictionService)
+	h.SetDistillationTelemetryService(distillationTelemetryService)
 	return h
 }
 
@@ -138,14 +146,18 @@ func ProvideOpenAIGatewayHandler(
 	coordinator *securityaudit.Coordinator,
 	compositeResolver *service.CompositeRouteResolver,
 	settingService *service.SettingService,
+	userModelRestrictionService *service.UserModelRestrictionService,
+	distillationTelemetryService *service.DistillationTelemetryService,
 ) *OpenAIGatewayHandler {
 	gatewayService.SetPluginManager(pluginManager)
+	gatewayService.SetLiveExecutionTelemetry(distillationTelemetryService)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, apiKeyService,
 		usageRecordWorkerPool, errorPassthroughService, contentModerationService, opsService, cfg)
 	h.compositeResolver = compositeResolver
 	h.securityAuditCoordinator = coordinator
 	h.grokMediaEligibilityProber = grokQuotaService
 	h.SetPromptInjectionService(service.NewPromptInjectionService(settingService))
+	h.SetUserModelRestrictionService(userModelRestrictionService)
 	return h
 }
 
@@ -237,6 +249,7 @@ func ProvideHandlers(
 
 // ProviderSet is the Wire provider set for all handlers
 var ProviderSet = wire.NewSet(
+	admin.NewDistillationRiskHandler,
 	NewSharedSubscriptionHandler,
 	// Top-level handlers
 	NewAuthHandler,
@@ -256,13 +269,14 @@ var ProviderSet = wire.NewSet(
 	NewPaymentHandler,
 	NewPaymentWebhookHandler,
 	NewAvailableChannelHandler,
-	NewModelPlazaHandler,
+	ProvideModelPlazaHandler,
 	NewAsyncImageHandler,
 	ProvideBatchImageHandler,
 
 	// Admin handlers
 	admin.NewDashboardHandler,
 	admin.NewUserHandler,
+	admin.NewUserModelRestrictionHandler,
 	admin.NewGroupHandlerWithConfig,
 	admin.ProvideAccountHandler,
 	admin.NewAnnouncementHandler,

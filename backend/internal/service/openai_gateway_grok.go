@@ -115,6 +115,12 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			return nil, buildErr
 		}
 
+		ctx = WithModelIdentityContext(ctx, "responses", "", "")
+		UpdateModelExecutionPayload(ctx, patchedBody)
+		if policyErr := EnforceUserModelRestriction(ctx, account, UserModelRestrictionModelsFromPayload(upstreamModel, patchedBody)...); policyErr != nil {
+			WriteUserModelRestrictionError(c, UserModelRestrictionProtocolOpenAI, policyErr)
+			return nil, policyErr
+		}
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {

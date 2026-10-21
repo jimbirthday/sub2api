@@ -52,6 +52,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
+	"github.com/Wei-Shaw/sub2api/ent/usermodelrestriction"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 
@@ -137,6 +138,8 @@ type Client struct {
 	UserAttributeDefinition *UserAttributeDefinitionClient
 	// UserAttributeValue is the client for interacting with the UserAttributeValue builders.
 	UserAttributeValue *UserAttributeValueClient
+	// UserModelRestriction is the client for interacting with the UserModelRestriction builders.
+	UserModelRestriction *UserModelRestrictionClient
 	// UserPlatformQuota is the client for interacting with the UserPlatformQuota builders.
 	UserPlatformQuota *UserPlatformQuotaClient
 	// UserSubscription is the client for interacting with the UserSubscription builders.
@@ -189,6 +192,7 @@ func (c *Client) init() {
 	c.UserAllowedGroup = NewUserAllowedGroupClient(c.config)
 	c.UserAttributeDefinition = NewUserAttributeDefinitionClient(c.config)
 	c.UserAttributeValue = NewUserAttributeValueClient(c.config)
+	c.UserModelRestriction = NewUserModelRestrictionClient(c.config)
 	c.UserPlatformQuota = NewUserPlatformQuotaClient(c.config)
 	c.UserSubscription = NewUserSubscriptionClient(c.config)
 }
@@ -320,6 +324,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		UserAllowedGroup:              NewUserAllowedGroupClient(cfg),
 		UserAttributeDefinition:       NewUserAttributeDefinitionClient(cfg),
 		UserAttributeValue:            NewUserAttributeValueClient(cfg),
+		UserModelRestriction:          NewUserModelRestrictionClient(cfg),
 		UserPlatformQuota:             NewUserPlatformQuotaClient(cfg),
 		UserSubscription:              NewUserSubscriptionClient(cfg),
 	}, nil
@@ -378,6 +383,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		UserAllowedGroup:              NewUserAllowedGroupClient(cfg),
 		UserAttributeDefinition:       NewUserAttributeDefinitionClient(cfg),
 		UserAttributeValue:            NewUserAttributeValueClient(cfg),
+		UserModelRestriction:          NewUserModelRestrictionClient(cfg),
 		UserPlatformQuota:             NewUserPlatformQuotaClient(cfg),
 		UserSubscription:              NewUserSubscriptionClient(cfg),
 	}, nil
@@ -419,7 +425,7 @@ func (c *Client) Use(hooks ...Hook) {
 		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
 		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
 		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.UserModelRestriction, c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -439,7 +445,7 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
 		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
 		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.UserModelRestriction, c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -522,6 +528,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.UserAttributeDefinition.mutate(ctx, m)
 	case *UserAttributeValueMutation:
 		return c.UserAttributeValue.mutate(ctx, m)
+	case *UserModelRestrictionMutation:
+		return c.UserModelRestriction.mutate(ctx, m)
 	case *UserPlatformQuotaMutation:
 		return c.UserPlatformQuota.mutate(ctx, m)
 	case *UserSubscriptionMutation:
@@ -6488,6 +6496,155 @@ func (c *UserAttributeValueClient) mutate(ctx context.Context, m *UserAttributeV
 	}
 }
 
+// UserModelRestrictionClient is a client for the UserModelRestriction schema.
+type UserModelRestrictionClient struct {
+	config
+}
+
+// NewUserModelRestrictionClient returns a client for the UserModelRestriction from the given config.
+func NewUserModelRestrictionClient(c config) *UserModelRestrictionClient {
+	return &UserModelRestrictionClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `usermodelrestriction.Hooks(f(g(h())))`.
+func (c *UserModelRestrictionClient) Use(hooks ...Hook) {
+	c.hooks.UserModelRestriction = append(c.hooks.UserModelRestriction, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `usermodelrestriction.Intercept(f(g(h())))`.
+func (c *UserModelRestrictionClient) Intercept(interceptors ...Interceptor) {
+	c.inters.UserModelRestriction = append(c.inters.UserModelRestriction, interceptors...)
+}
+
+// Create returns a builder for creating a UserModelRestriction entity.
+func (c *UserModelRestrictionClient) Create() *UserModelRestrictionCreate {
+	mutation := newUserModelRestrictionMutation(c.config, OpCreate)
+	return &UserModelRestrictionCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of UserModelRestriction entities.
+func (c *UserModelRestrictionClient) CreateBulk(builders ...*UserModelRestrictionCreate) *UserModelRestrictionCreateBulk {
+	return &UserModelRestrictionCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *UserModelRestrictionClient) MapCreateBulk(slice any, setFunc func(*UserModelRestrictionCreate, int)) *UserModelRestrictionCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &UserModelRestrictionCreateBulk{err: fmt.Errorf("calling to UserModelRestrictionClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*UserModelRestrictionCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &UserModelRestrictionCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for UserModelRestriction.
+func (c *UserModelRestrictionClient) Update() *UserModelRestrictionUpdate {
+	mutation := newUserModelRestrictionMutation(c.config, OpUpdate)
+	return &UserModelRestrictionUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *UserModelRestrictionClient) UpdateOne(_m *UserModelRestriction) *UserModelRestrictionUpdateOne {
+	mutation := newUserModelRestrictionMutation(c.config, OpUpdateOne, withUserModelRestriction(_m))
+	return &UserModelRestrictionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *UserModelRestrictionClient) UpdateOneID(id int64) *UserModelRestrictionUpdateOne {
+	mutation := newUserModelRestrictionMutation(c.config, OpUpdateOne, withUserModelRestrictionID(id))
+	return &UserModelRestrictionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for UserModelRestriction.
+func (c *UserModelRestrictionClient) Delete() *UserModelRestrictionDelete {
+	mutation := newUserModelRestrictionMutation(c.config, OpDelete)
+	return &UserModelRestrictionDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *UserModelRestrictionClient) DeleteOne(_m *UserModelRestriction) *UserModelRestrictionDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *UserModelRestrictionClient) DeleteOneID(id int64) *UserModelRestrictionDeleteOne {
+	builder := c.Delete().Where(usermodelrestriction.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &UserModelRestrictionDeleteOne{builder}
+}
+
+// Query returns a query builder for UserModelRestriction.
+func (c *UserModelRestrictionClient) Query() *UserModelRestrictionQuery {
+	return &UserModelRestrictionQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUserModelRestriction},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a UserModelRestriction entity by its id.
+func (c *UserModelRestrictionClient) Get(ctx context.Context, id int64) (*UserModelRestriction, error) {
+	return c.Query().Where(usermodelrestriction.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *UserModelRestrictionClient) GetX(ctx context.Context, id int64) *UserModelRestriction {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryUser queries the user edge of a UserModelRestriction.
+func (c *UserModelRestrictionClient) QueryUser(_m *UserModelRestriction) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usermodelrestriction.Table, usermodelrestriction.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, usermodelrestriction.UserTable, usermodelrestriction.UserColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *UserModelRestrictionClient) Hooks() []Hook {
+	return c.hooks.UserModelRestriction
+}
+
+// Interceptors returns the client interceptors.
+func (c *UserModelRestrictionClient) Interceptors() []Interceptor {
+	return c.inters.UserModelRestriction
+}
+
+func (c *UserModelRestrictionClient) mutate(ctx context.Context, m *UserModelRestrictionMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UserModelRestrictionCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UserModelRestrictionUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UserModelRestrictionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UserModelRestrictionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown UserModelRestriction mutation op: %q", m.Op())
+	}
+}
+
 // UserPlatformQuotaClient is a client for the UserPlatformQuota schema.
 type UserPlatformQuotaClient struct {
 	config
@@ -6849,8 +7006,8 @@ type (
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
 		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
 		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Hook
+		UserAttributeDefinition, UserAttributeValue, UserModelRestriction,
+		UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
@@ -6861,8 +7018,8 @@ type (
 		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
 		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
 		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription []ent.Interceptor
+		UserAttributeDefinition, UserAttributeValue, UserModelRestriction,
+		UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

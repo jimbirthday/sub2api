@@ -30,6 +30,13 @@ func RegisterAdminRoutes(
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
 	admin.Use(middleware.AdminComplianceGuard(settingService))
+	admin.GET("/model-restrictions", h.Admin.UserModelRestriction.List)
+	admin.GET("/model-restrictions/catalog", h.Admin.UserModelRestriction.ModelIdentityCatalog)
+	admin.PUT("/model-restrictions/catalog", h.Admin.UserModelRestriction.ReplaceModelIdentityCatalog)
+	admin.GET("/model-catalog", h.Admin.UserModelRestriction.ModelIdentityCatalog)
+	admin.POST("/model-catalog/entries", h.Admin.UserModelRestriction.CreateCatalogEntry)
+	admin.POST("/model-catalog/aliases", h.Admin.UserModelRestriction.CreateCatalogAlias)
+	admin.DELETE("/model-catalog/aliases/:alias_id", h.Admin.UserModelRestriction.DeleteCatalogAlias)
 	{
 		if h.SharedSubscription != nil {
 			shared := admin.Group("/shared-subscriptions")
@@ -49,6 +56,8 @@ func RegisterAdminRoutes(
 
 		// 仪表盘
 		registerDashboardRoutes(admin, h)
+
+		registerDistillationRiskRoutes(admin, h)
 
 		// 用户管理
 		registerUserManagementRoutes(admin, h)
@@ -322,6 +331,12 @@ func registerUserManagementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		users.GET("", h.Admin.User.List)
 		users.GET("/:id", h.Admin.User.GetByID)
+		users.GET("/:id/model-restrictions", h.Admin.UserModelRestriction.Get)
+		users.POST("/:id/model-restrictions/evaluate", h.Admin.UserModelRestriction.Evaluate)
+		users.PUT("/:id/model-restrictions", h.Admin.UserModelRestriction.Replace)
+		users.DELETE("/:id/model-restrictions", h.Admin.UserModelRestriction.Clear)
+		users.GET("/:id/model-restrictions/history", h.Admin.UserModelRestriction.History)
+		users.GET("/:id/model-restrictions/history/:revision", h.Admin.UserModelRestriction.Version)
 		users.POST("/:id/auth-identities", h.Admin.User.BindAuthIdentity)
 		users.POST("", h.Admin.User.Create)
 		users.PUT("/:id", h.Admin.User.Update)
@@ -917,4 +932,22 @@ func channelMonitorModeV2Guard(settingService *service.SettingService) gin.Handl
 		}
 		c.Next()
 	}
+}
+
+func registerDistillationRiskRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	if h == nil || h.Admin == nil || h.Admin.DistillationRisk == nil {
+		return
+	}
+	risk := admin.Group("/distillation-risk")
+	risk.GET("/overview", h.Admin.DistillationRisk.Overview)
+	risk.GET("/users", h.Admin.DistillationRisk.Users)
+	risk.GET("/users/:id", h.Admin.DistillationRisk.User)
+	risk.GET("/users/:id/trends", h.Admin.DistillationRisk.Trends)
+	risk.GET("/events", h.Admin.DistillationRisk.Events)
+	risk.GET("/config", h.Admin.DistillationRisk.GetConfig)
+	risk.PUT("/config", h.Admin.DistillationRisk.UpdateConfig)
+	risk.GET("/exemptions", h.Admin.DistillationRisk.Exemptions)
+	risk.POST("/exemptions", h.Admin.DistillationRisk.CreateExemption)
+	risk.DELETE("/exemptions", h.Admin.DistillationRisk.RevokeExemption)
+	risk.POST("/actions", h.Admin.DistillationRisk.Actions)
 }

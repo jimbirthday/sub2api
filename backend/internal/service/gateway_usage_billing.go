@@ -695,6 +695,32 @@ func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usage
 
 // RecordUsage 记录使用量并扣费（或更新订阅用量）
 func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInput) error {
+	if input == nil {
+		return errors.New("usage input is nil")
+	}
+	var inputTokens, outputTokens *int64
+	if input.Result != nil {
+		v := int64(input.Result.Usage.InputTokens)
+		inputTokens = &v
+		v2 := int64(input.Result.Usage.OutputTokens)
+		outputTokens = &v2
+	}
+	wrappedCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var callErr error
+	defer func() {
+		status := "completed"
+		if callErr != nil {
+			status = "failed"
+		}
+		_ = CompleteDistillationAttempt(wrappedCtx, inputTokens, outputTokens, status, callErr == nil, time.Now().UTC())
+		CompleteModelExecution(wrappedCtx, callErr == nil)
+	}()
+	callErr = s.recordUsage(wrappedCtx, input)
+	return callErr
+}
+
+func (s *GatewayService) recordUsage(ctx context.Context, input *RecordUsageInput) error {
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
 		Result:             input.Result,
 		APIKey:             input.APIKey,

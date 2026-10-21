@@ -36,6 +36,7 @@ type antigravityRetryLoopParams struct {
 	accountRepo     AccountRepository // 用于智能重试的模型级别限流
 	handleError     func(ctx context.Context, prefix string, account *Account, statusCode int, headers http.Header, body []byte, requestedModel string, groupID int64, sessionHash string, isStickySession bool) *handleModelRateLimitResult
 	requestedModel  string // 用于限流检查的原始请求模型
+	upstreamModel   string // 实际写入上游请求的模型，用于最终用户策略准入
 	isStickySession bool   // 是否为粘性会话（用于账号切换时的缓存计费判断）
 	groupID         int64  // 用于模型级限流时清除粘性会话
 	sessionHash     string // 用于模型级限流时清除粘性会话
@@ -223,6 +224,16 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 				}
 			}
 
+			policyModel := strings.TrimSpace(p.upstreamModel)
+			if policyModel == "" {
+				policyModel = p.requestedModel
+			}
+			UpdateModelExecutionPayload(p.ctx, p.body)
+			if policyErr := EnforceUserModelRestriction(p.ctx, p.account, policyModel); policyErr != nil {
+				WriteUserModelRestrictionError(p.c, UserModelRestrictionProtocolGoogle, policyErr)
+				return &smartRetryResult{action: smartRetryActionBreakWithResp, err: policyErr}
+			}
+
 			retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 			if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
 				log.Printf("%s status=%d smart_retry_success attempt=%d/%d", p.prefix, retryResp.StatusCode, attempt, maxAttempts)
@@ -235,9 +246,14 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 				return &smartRetryResult{action: smartRetryActionBreakWithResp, resp: retryResp}
 			}
 
-			// 网络错误时，继续重试
+			// An uncertain durable send must not be automatically resubmitted.
 			if retryErr != nil || retryResp == nil {
-				log.Printf("%s status=smart_retry_network_error attempt=%d/%d error=%v", p.prefix, attempt, maxAttempts, retryErr)
+				if MarkCurrentModelExecutionAttemptUnknown(p.ctx) {
+					if retryErr == nil {
+						retryErr = errors.New("upstream returned nil response")
+					}
+					return &smartRetryResult{action: smartRetryActionBreakWithResp, err: retryErr}
+				}
 				continue
 			}
 
@@ -398,6 +414,16 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 			break
 		}
 
+		policyModel := strings.TrimSpace(p.upstreamModel)
+		if policyModel == "" {
+			policyModel = p.requestedModel
+		}
+		UpdateModelExecutionPayload(p.ctx, p.body)
+		if policyErr := EnforceUserModelRestriction(p.ctx, p.account, policyModel); policyErr != nil {
+			WriteUserModelRestrictionError(p.c, UserModelRestrictionProtocolGoogle, policyErr)
+			return &smartRetryResult{action: smartRetryActionBreakWithResp, err: policyErr}
+		}
+
 		retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 		if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d single_account_503_retry_success attempt=%d/%d total_waited=%v",
@@ -409,10 +435,14 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 			return &smartRetryResult{action: smartRetryActionBreakWithResp, resp: retryResp}
 		}
 
-		// 网络错误时继续重试
+		// An uncertain durable send must not be automatically resubmitted.
 		if retryErr != nil || retryResp == nil {
-			logger.LegacyPrintf("service.antigravity_gateway", "%s single_account_503_retry: network_error attempt=%d/%d error=%v",
-				p.prefix, attempt, antigravitySingleAccountSmartRetryMaxAttempts, retryErr)
+			if MarkCurrentModelExecutionAttemptUnknown(p.ctx) {
+				if retryErr == nil {
+					retryErr = errors.New("upstream returned nil response")
+				}
+				return &smartRetryResult{action: smartRetryActionBreakWithResp, err: retryErr}
+			}
 			continue
 		}
 
@@ -530,6 +560,14 @@ urlFallbackLoop:
 				return nil, p.ctx.Err()
 			default:
 			}
+			policyModel := strings.TrimSpace(p.upstreamModel)
+			if policyModel == "" {
+				policyModel = p.requestedModel
+			}
+			if err := EnforceUserModelRestriction(p.ctx, p.account, policyModel); err != nil {
+				WriteUserModelRestrictionError(p.c, UserModelRestrictionProtocolGoogle, err)
+				return nil, err
+			}
 
 			upstreamReq, err := antigravity.NewAPIRequestWithURL(p.ctx, baseURL, p.action, p.accessToken, p.body)
 			if err != nil {
@@ -541,6 +579,7 @@ urlFallbackLoop:
 				err = errors.New("upstream returned nil response")
 			}
 			if err != nil {
+				MarkCurrentModelExecutionAttemptUnknown(p.ctx)
 				safeErr := sanitizeUpstreamErrorMessage(err.Error())
 				appendOpsUpstreamError(p.c, OpsUpstreamErrorEvent{
 					ProxyID:            opsUpstreamProxyID(p.account),

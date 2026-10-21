@@ -37,6 +37,8 @@ import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
 import pluginsAPI from './plugins'
 import promptInjectionAPI from './promptInjection'
+import modelRestrictionsAPI from './modelRestrictions'
+import distillationRiskAPI from './distillationRisk'
 
 /**
  * Unified admin API object for convenient access
@@ -75,6 +77,8 @@ export const adminAPI = {
   compliance: adminComplianceAPI,
   audit: auditAPI,
   plugins: pluginsAPI,
+  distillationRisk: distillationRiskAPI,
+  modelRestrictions: modelRestrictionsAPI,
   promptInjection: promptInjectionAPI
 }
 
@@ -112,6 +116,8 @@ export {
   adminComplianceAPI,
   auditAPI,
   pluginsAPI,
+  distillationRiskAPI,
+  modelRestrictionsAPI,
   promptInjectionAPI
 }
 

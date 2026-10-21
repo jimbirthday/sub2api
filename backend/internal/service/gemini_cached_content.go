@@ -953,6 +953,9 @@ func GeminiCachedContentUpstreamModelResource(account *Account, mappedModel stri
 
 // CreateUpstream 在账号上创建上游缓存。
 func (s *GeminiCachedContentService) CreateUpstream(ctx context.Context, account *Account, req *GeminiCachedContentCreateRequest, mappedModel, publicID string, ttl time.Duration) (*GeminiCachedContentUpstream, error) {
+	if err := EnforceUserModelRestrictionWithoutBudget(ctx, account, mappedModel); err != nil {
+		return nil, err
+	}
 	upstreamModel, err := GeminiCachedContentUpstreamModelResource(account, mappedModel)
 	if err != nil {
 		return nil, err
