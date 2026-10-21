@@ -37,6 +37,7 @@ func TestExecutionAttemptRecoveryDeduplicatesOperationAndRetainsUnknown(t *testi
 	r := &distillationTelemetryRepository{db: db}
 	cache, client := newModelExecutionBudgetCache(t)
 	ctx := context.Background()
+	m.ExpectQuery("SELECT a.id,a.user_id").WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "operation_id", "account_id", "provider", "attempt_id", "detach_operation"}))
 	m.ExpectBegin()
 	m.ExpectExec("UPDATE model_execution_attempts a SET state='completed'").WillReturnResult(sqlmock.NewResult(0, 0))
 	m.ExpectCommit()
@@ -67,6 +68,7 @@ func TestExecutionAttemptRecoveryFencesExistingLeaseAndRestoresUnknownTargets(t 
 	lease, err := cache.ReserveModelExecution(ctx, current)
 	require.NoError(t, err)
 	for range 2 {
+		m.ExpectQuery("SELECT a.id,a.user_id").WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "operation_id", "account_id", "provider", "attempt_id", "detach_operation"}))
 		m.ExpectBegin()
 		m.ExpectExec("UPDATE model_execution_attempts a SET state='completed'").WillReturnResult(sqlmock.NewResult(0, 0))
 		m.ExpectCommit()

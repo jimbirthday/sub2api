@@ -58,13 +58,16 @@ func (r *distillationTelemetryRepository) ReconcileExecutionAttempts(ctx context
 // RecoverExecutionBudgets restores conservative per-operation occupancy. Multiple
 // attempts never multiply the user slot; their dependency union is retained.
 func (r *distillationTelemetryRepository) RecoverExecutionBudgets(ctx context.Context, cache service.ModelExecutionBudgetCache) error {
+	if err := r.detachObservationCapacity(ctx, cache); err != nil {
+		return err
+	}
 	if err := r.completeTerminalBatchAttempts(ctx); err != nil {
 		return err
 	}
 	if err := r.ReconcileExecutionAttempts(ctx, time.Now().Add(-60*time.Second)); err != nil {
 		return err
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT user_id,operation_id,COALESCE(jsonb_agg(DISTINCT target) FILTER(WHERE target IS NOT NULL),'[]'::jsonb),bool_or(state='unknown') FROM model_execution_attempts LEFT JOIN LATERAL jsonb_array_elements_text(targets) AS target ON TRUE WHERE state IN('running','unknown') GROUP BY user_id,operation_id`)
+	rows, err := r.db.QueryContext(ctx, `SELECT user_id,operation_id,COALESCE(jsonb_agg(DISTINCT target) FILTER(WHERE target IS NOT NULL),'[]'::jsonb),bool_or(state='unknown') FROM model_execution_attempts LEFT JOIN LATERAL jsonb_array_elements_text(targets) AS target ON TRUE WHERE enforces_limits AND state IN('running','unknown') GROUP BY user_id,operation_id`)
 	if err != nil {
 		return err
 	}
@@ -155,7 +158,7 @@ func (r *distillationTelemetryRepository) recoverProviderAttempts(ctx context.Co
 	if !ok {
 		return nil
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT COALESCE(account_id,0),COALESCE(provider,''),attempt_id FROM model_execution_attempts WHERE state='unknown'`)
+	rows, err := r.db.QueryContext(ctx, `SELECT COALESCE(account_id,0),COALESCE(provider,''),attempt_id FROM model_execution_attempts WHERE enforces_limits AND state='unknown'`)
 	if err != nil {
 		return err
 	}
@@ -171,6 +174,57 @@ func (r *distillationTelemetryRepository) recoverProviderAttempts(ctx context.Co
 		}
 	}
 	return rows.Err()
+}
+
+// Detach only the former observation limiter's Redis occupancy. In particular,
+// this does not assert remote termination, change attempt state, or refund money.
+func (r *distillationTelemetryRepository) detachObservationCapacity(ctx context.Context, cache service.ModelExecutionBudgetCache) error {
+	cleaner, ok := cache.(interface {
+		ReleaseExecutionProviderAttempt(context.Context, int64, string, string) error
+		ReclaimExecutionOperation(context.Context, int64, string) error
+	})
+	if !ok {
+		return nil
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT a.id,a.user_id,a.operation_id,COALESCE(a.account_id,0),COALESCE(a.provider,''),a.attempt_id,
+NOT EXISTS(SELECT 1 FROM model_execution_attempts enforced WHERE enforced.operation_id=a.operation_id AND enforced.enforces_limits) AS detach_operation
+FROM model_execution_attempts a WHERE NOT a.enforces_limits AND a.observation_detached_at IS NULL AND a.state IN('running','unknown') ORDER BY a.id LIMIT 500`)
+	if err != nil {
+		return err
+	}
+	type observation struct {
+		id, userID, accountID        int64
+		operation, provider, attempt string
+		detachOperation              bool
+	}
+	var pending []observation
+	for rows.Next() {
+		var a observation
+		if err = rows.Scan(&a.id, &a.userID, &a.operation, &a.accountID, &a.provider, &a.attempt, &a.detachOperation); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		pending = append(pending, a)
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	for _, a := range pending {
+		if err = cleaner.ReleaseExecutionProviderAttempt(ctx, a.accountID, a.provider, a.attempt); err != nil {
+			return err
+		}
+		if a.detachOperation {
+			if err = cleaner.ReclaimExecutionOperation(ctx, a.userID, a.operation); err != nil {
+				return err
+			}
+		}
+		if _, err = r.db.ExecContext(ctx, `UPDATE model_execution_attempts SET observation_detached_at=NOW() WHERE id=$1 AND NOT enforces_limits`, a.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // The database transaction is the authoritative remote termination proof for a

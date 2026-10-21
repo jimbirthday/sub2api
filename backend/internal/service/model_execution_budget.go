@@ -95,15 +95,15 @@ type modelExecutionBudgetContext struct {
 	cache                           ModelExecutionBudgetCache
 	telemetry                       *DistillationTelemetryService
 	userID                          int64
-	userLimit                       int
 	batchOutstanding, batchLimit    int
-	rpmLimit                        int
 	operationID                     string
 	payloadHash                     string
 	lease                           *ModelExecutionLease
 	mu                              sync.Mutex
 	unknown                         bool
 	completed                       bool
+	budgetBypassed                  bool
+	durable                         bool
 	attempts                        []string
 	heartbeatStop                   chan struct{}
 	policyRevision, catalogRevision int64
@@ -120,8 +120,8 @@ func WithModelExecutionBudget(ctx context.Context, cache ModelExecutionBudgetCac
 	}
 	sum := sha256.Sum256(payload)
 	return context.WithValue(ctx, modelExecutionBudgetContextKey{}, &modelExecutionBudgetContext{
-		cache: cache, telemetry: telemetry, userID: userID, userLimit: userLimit,
-		fundsState: "none", ownerID: generateRequestID(), rpmLimit: rpmLimit, operationID: operationID, payloadHash: hex.EncodeToString(sum[:]),
+		cache: cache, telemetry: telemetry, userID: userID,
+		fundsState: "none", ownerID: generateRequestID(), operationID: operationID, payloadHash: hex.EncodeToString(sum[:]),
 	})
 }
 
@@ -188,6 +188,21 @@ func ReserveAndConfirmModelExecution(ctx context.Context, decision *UserModelRes
 	if b == nil || decision == nil {
 		return nil
 	}
+	b.mu.Lock()
+	if b.unknown || b.completed {
+		b.mu.Unlock()
+		return ErrModelExecutionBudgetUnavailable
+	}
+	limits, rpm := modelExecutionTargetCaps(decision)
+	// Observation is telemetry, not a second user concurrency/RPM limiter.
+	// Only explicit model caps and remote asynchronous work need this lease.
+	if b.lease == nil && !b.durable && len(limits) == 0 && len(rpm) == 0 {
+		b.budgetBypassed = true
+		b.mu.Unlock()
+		return nil
+	}
+	b.budgetBypassed = false
+	b.mu.Unlock()
 	if err := b.telemetry.RecoverExecutionBudgets(ctx, b.cache); err != nil {
 		return ErrModelExecutionBudgetUnavailable
 	}
@@ -240,7 +255,7 @@ func ReserveAndConfirmModelExecution(ctx context.Context, decision *UserModelRes
 	lease, err := b.cache.ReserveModelExecution(ctx, ModelExecutionReservation{
 		UserID: b.userID, OperationID: b.operationID, Targets: targets,
 		PolicyRevision: decision.PolicyRevision, CatalogRevision: decision.CatalogRevision,
-		PayloadHash: b.payloadHash, UserLimit: b.userLimit, RPMLimit: b.rpmLimit, BatchOutstanding: b.batchOutstanding, BatchLimit: b.batchLimit,
+		PayloadHash: b.payloadHash, BatchOutstanding: b.batchOutstanding, BatchLimit: b.batchLimit,
 		TargetLimits: targetLimits, TargetRPMLimits: targetRPMLimits,
 	})
 	if err != nil {
@@ -374,6 +389,9 @@ func PersistModelExecutionAttempt(ctx context.Context, account *Account) error {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.lease == nil && b.budgetBypassed {
+		return nil
+	}
 	if b.lease == nil || b.unknown || b.completed {
 		return ErrModelExecutionBudgetUnavailable
 	}
@@ -435,7 +453,22 @@ func BeginModelExecutionTurn(ctx context.Context, turn int) error {
 	b.lease = nil
 	b.attempts = nil
 	b.completed = false
+	b.budgetBypassed = false
 	return nil
+}
+
+// RequireDurableModelExecution keeps asynchronous remote work recoverable even
+// without an explicit model cap. Ordinary observed HTTP requests use telemetry.
+func RequireDurableModelExecution(ctx context.Context) {
+	if ctx == nil {
+		return
+	}
+	b, _ := ctx.Value(modelExecutionBudgetContextKey{}).(*modelExecutionBudgetContext)
+	if b != nil {
+		b.mu.Lock()
+		b.durable = true
+		b.mu.Unlock()
+	}
 }
 
 // BindModelExecutionHold records the already reserved hold; this layer never
@@ -464,6 +497,7 @@ func SetModelExecutionBatchOutstanding(ctx context.Context, count, limit int) er
 	}
 	b.batchOutstanding = count
 	b.batchLimit = limit
+	b.durable = true
 	return nil
 }
 

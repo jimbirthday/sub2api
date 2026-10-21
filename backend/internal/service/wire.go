@@ -1112,12 +1112,15 @@ func ProvideDistillationRiskService(repo DistillationRiskRepository) *Distillati
 	return svc
 }
 
-func ProvideDistillationTelemetryService(repo DistillationTelemetryRepository, cfg *config.Config) *DistillationTelemetryService {
+func ProvideDistillationTelemetryService(repo DistillationTelemetryRepository, cfg *config.Config, cache ConcurrencyCache) *DistillationTelemetryService {
 	secret := ""
 	if cfg != nil {
 		secret = cfg.JWT.Secret
 	}
 	svc := NewDistillationTelemetryService(repo, secret, 4096)
 	svc.Start(4)
+	if executionCache, ok := cache.(ModelExecutionBudgetCache); ok {
+		svc.StartExecutionRecovery(executionCache)
+	}
 	return svc
 }

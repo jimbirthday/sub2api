@@ -316,6 +316,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 		model = "gpt-live"
 	}
 	UpdateModelExecutionPayload(ctx, body)
+	RequireDurableModelExecution(ctx)
 	if err := EnforceUserModelRestriction(ctx, account, UserModelRestrictionModelsFromPayload(model, body)...); err != nil {
 		return nil, err
 	}

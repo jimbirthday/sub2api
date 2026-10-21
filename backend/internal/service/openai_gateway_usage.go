@@ -172,7 +172,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			status = "failed"
 		}
 		_ = CompleteDistillationAttempt(wrappedCtx, inputTokens, outputTokens, status, callErr == nil, time.Now().UTC())
-		CompleteModelExecution(wrappedCtx, callErr == nil)
+		// Provider completion is independent of whether local billing succeeds.
+		CompleteModelExecution(wrappedCtx, input.Result != nil && !input.Result.ClientDisconnect)
 	}()
 	callErr = s.recordUsage(wrappedCtx, input)
 	return callErr

@@ -438,6 +438,34 @@ func (s *DistillationTelemetryService) RecoverExecutionBudgets(ctx context.Conte
 	return nil
 }
 
+// StartExecutionRecovery also reconciles old observation leases when no new
+// request needs an enforced model budget. Recovery cannot gate observation.
+func (s *DistillationTelemetryService) StartExecutionRecovery(cache ModelExecutionBudgetCache) {
+	if s == nil || cache == nil {
+		return
+	}
+	s.workers.Add(1)
+	go func() {
+		defer s.workers.Done()
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+		for {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			err := s.RecoverExecutionBudgets(ctx, cache)
+			cancel()
+			if err == nil {
+				return
+			}
+			slog.Error("execution budget startup recovery failed", "error", err)
+			select {
+			case <-s.stop:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
 func (s *DistillationTelemetryService) recoverExecutionBudgets(ctx context.Context, cache ModelExecutionBudgetCache) error {
 	if st, ok := s.repo.(interface {
 		RecoverExecutionBudgets(context.Context, ModelExecutionBudgetCache) error
