@@ -118,11 +118,12 @@ func TestDistillationSealedAggregateSQL(t *testing.T) {
 		}
 	}
 	require.True(t, found)
-	// Four requests begun in the preceding bucket remain concurrent in this
-	// bucket. A retry's unresolved earlier attempt must still invalidate it.
+	// Six requests begun in the preceding bucket remain concurrent in this
+	// bucket (saturation requires at least six concurrent operations). A
+	// retry's unresolved earlier attempt must still invalidate it.
 	telemetryRepo := &distillationTelemetryRepository{db: integrationDB}
 	var previous []service.DistillationAttempt
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 6; i++ {
 		a := service.DistillationAttempt{AttemptID: uuid.New(), UserID: user.ID, OperationID: fmt.Sprintf("carry-%d-%d", user.ID, i), Provider: "openai", Model: "family-a", Cohort: "interactive", ConfiguredConcurrency: 4, ObservedConcurrency: 4, StartedAt: start.Add(-time.Minute), PromptHMAC: make([]byte, 32), HMACDay: &start}
 		require.NoError(t, telemetryRepo.CreateAttempt(ctx, a))
 		previous = append(previous, a)

@@ -289,6 +289,13 @@ func (s *DistillationRiskService) evaluateWindow(a DistillationWindowAggregate, 
 	if now.UTC().Before(e.SealAt) {
 		return e, fmt.Errorf("%w: window is not sealed", ErrDistillationInvalid)
 	}
+	// Insufficient windows must not carry any partially populated signal so
+	// that persisted evidence stays self-consistent (score=NULL and every
+	// signal unavailable).
+	if a.WorkloadUnits < DistillationMinWorkloadUnits || a.TotalTokens < DistillationMinTokens {
+		e.Status = "insufficient_data"
+		return e, nil
+	}
 	// Cohorts are evaluated independently. Async/batch traffic is not merged
 	// with interactive traffic; it may still be scored when its own telemetry
 	// and token baseline are complete.
@@ -313,10 +320,6 @@ func (s *DistillationRiskService) evaluateWindow(a DistillationWindowAggregate, 
 		score += points
 	} else {
 		e.Signals.PromptRepeatRatio = unavailableDistillationSignal("retry-deduplicated prompt telemetry unavailable")
-	}
-	if a.WorkloadUnits < DistillationMinWorkloadUnits || a.TotalTokens < DistillationMinTokens {
-		e.Status = "insufficient_data"
-		return e, nil
 	}
 
 	if a.TelemetryComplete && a.RequestRateSaturation != nil && finiteDistillationValue(*a.RequestRateSaturation) {

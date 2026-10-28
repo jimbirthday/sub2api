@@ -79,6 +79,22 @@ func (c StubConcurrencyCache) CleanupExpiredAccountSlots(_ context.Context, _ in
 func (c StubConcurrencyCache) CleanupExpiredAccountSlotKeys(_ context.Context) error {
 	return nil
 }
+func (c StubConcurrencyCache) AcquireGroupSlot(_ context.Context, _ int64, _ int, _ string) (bool, error) {
+	return true, nil
+}
+func (c StubConcurrencyCache) ReleaseGroupSlot(_ context.Context, _ int64, _ string) error {
+	return nil
+}
+func (c StubConcurrencyCache) GetGroupConcurrency(_ context.Context, _ int64) (int, error) {
+	return 0, nil
+}
+func (c StubConcurrencyCache) GetGroupConcurrencyBatch(_ context.Context, groupIDs []int64) (map[int64]int, error) {
+	result := make(map[int64]int, len(groupIDs))
+	for _, id := range groupIDs {
+		result[id] = 0
+	}
+	return result, nil
+}
 func (c StubConcurrencyCache) CleanupStaleProcessSlots(_ context.Context, _ string) error {
 	return nil
 }

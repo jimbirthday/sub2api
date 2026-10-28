@@ -588,11 +588,24 @@ type AccountSelectionResult struct {
 	// 局部 ctx 上，handler 必须经 ContextWithSelectionProfitGate 重放后才能在
 	// 调度栈之外做抢槽后终检与准入后粘性绑定。
 	profitGate *openAIProfitControlGate
+	// schedulingGroup 是本次调度真实生效的分组（composite 为父分组、claude_code_only
+	// fallback 可能替换掉入口分组）。handler 用它施加分组整体并发闸门。
+	schedulingGroupID             int64
+	schedulingGroupMaxConcurrency int
 }
 
 // ProfitGateActive 报告本次选号是否处于利润门之下。
 func (r *AccountSelectionResult) ProfitGateActive() bool {
 	return r != nil && r.profitGate != nil
+}
+
+// SchedulingGroupGate returns the group ID and whole-group concurrency cap that
+// were effective for this selection. A max <= 0 means the group gate is disabled.
+func (r *AccountSelectionResult) SchedulingGroupGate() (groupID int64, maxConcurrency int) {
+	if r == nil {
+		return 0, 0
+	}
+	return r.schedulingGroupID, r.schedulingGroupMaxConcurrency
 }
 
 // ClaudeUsage 表示Claude API返回的usage信息

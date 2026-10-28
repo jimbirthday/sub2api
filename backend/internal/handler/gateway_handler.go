@@ -514,6 +514,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 账号槽位/等待计数需要在超时或断开时安全回收
 			accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
+			accountReleaseFunc = h.gatewaySlotWithGroupGate(c, selection, accountReleaseFunc, streamStarted)
+			if accountReleaseFunc == nil {
+				return
+			}
 
 			// 转发请求 - 根据账号平台分流
 			var result *service.ForwardResult
@@ -861,6 +865,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 账号槽位/等待计数需要在超时或断开时安全回收
 			accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
+			accountReleaseFunc = h.gatewaySlotWithGroupGate(c, selection, accountReleaseFunc, streamStarted)
+			if accountReleaseFunc == nil {
+				return
+			}
 
 			// ===== 用户消息串行队列 START =====
 			var queueRelease func()
@@ -2211,6 +2219,24 @@ func (h *GatewayHandler) checkClaudeCodeVersion(c *gin.Context) bool {
 }
 
 // errorResponse 返回Claude API格式的错误响应
+// gatewaySlotWithGroupGate applies the whole-group concurrency gate to an already
+// owned account release. On success it returns the combined release; on failure it
+// releases the account slot, writes the mapped error response and returns nil.
+func (h *GatewayHandler) gatewaySlotWithGroupGate(c *gin.Context, selection *service.AccountSelectionResult, accountRelease func(), streamStarted bool) func() {
+	if h == nil || h.concurrencyHelper == nil || selection == nil {
+		return accountRelease
+	}
+	combined, err := h.concurrencyHelper.EnforceGroupGate(c.Request.Context(), selection, accountRelease)
+	if err != nil {
+		if accountRelease != nil {
+			accountRelease()
+		}
+		h.handleConcurrencyError(c, err, "group", streamStarted)
+		return nil
+	}
+	return combined
+}
+
 func (h *GatewayHandler) errorResponse(c *gin.Context, status int, errType, message string) {
 	h.errorResponseWithCode(c, status, errType, "", message)
 }

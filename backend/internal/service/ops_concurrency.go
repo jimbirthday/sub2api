@@ -134,6 +134,7 @@ func (s *OpsService) GetConcurrencyStats(
 	platform := make(map[string]*PlatformConcurrencyInfo)
 	group := make(map[int64]*GroupConcurrencyInfo)
 	account := make(map[int64]*AccountConcurrencyInfo)
+	groupMax := make(map[int64]int)
 
 	for _, acc := range accounts {
 		if acc.ID <= 0 {
@@ -209,6 +210,9 @@ func (s *OpsService) GetConcurrencyStats(
 		// Group aggregation (one account may contribute to multiple groups).
 		if matchedGroup != nil {
 			grp := matchedGroup
+			if grp.MaxConcurrency > 0 {
+				groupMax[grp.ID] = grp.MaxConcurrency
+			}
 			if _, ok := group[grp.ID]; !ok {
 				group[grp.ID] = &GroupConcurrencyInfo{
 					GroupID:   grp.ID,
@@ -231,6 +235,9 @@ func (s *OpsService) GetConcurrencyStats(
 			for _, grp := range acc.Groups {
 				if grp == nil || grp.ID <= 0 {
 					continue
+				}
+				if grp.MaxConcurrency > 0 {
+					groupMax[grp.ID] = grp.MaxConcurrency
 				}
 				if _, ok := group[grp.ID]; !ok {
 					group[grp.ID] = &GroupConcurrencyInfo{
@@ -259,6 +266,26 @@ func (s *OpsService) GetConcurrencyStats(
 			info.LoadPercentage = float64(info.CurrentInUse) / float64(info.MaxCapacity) * 100
 		}
 	}
+	// 分组整体并发上限已配置的分组，优先展示分组闸门的真实占用（跨账号），
+	// 而不是账号并发之和；未配置上限的分组维持账号求和口径。
+	if len(groupMax) > 0 && s.concurrencyService != nil {
+		ids := make([]int64, 0, len(groupMax))
+		for id := range groupMax {
+			ids = append(ids, id)
+		}
+		if groupSlots, err := s.concurrencyService.GetGroupConcurrencyBatch(ctx, ids); err == nil {
+			for id, info := range group {
+				maxCap, ok := groupMax[id]
+				if !ok || maxCap <= 0 {
+					continue
+				}
+				info.CurrentInUse = int64(groupSlots[id])
+				info.MaxCapacity = int64(maxCap)
+				info.WaitingInQueue = 0
+			}
+		}
+	}
+
 	for _, info := range group {
 		if info.MaxCapacity > 0 {
 			info.LoadPercentage = float64(info.CurrentInUse) / float64(info.MaxCapacity) * 100
@@ -275,13 +302,15 @@ func (s *OpsService) listAllActiveUsersForOps(ctx context.Context) ([]User, erro
 	}
 
 	out := make([]User, 0, 128)
+	noSubs := false
 	page := 1
 	for {
 		users, pageInfo, err := s.userRepo.ListWithFilters(ctx, pagination.PaginationParams{
 			Page:     page,
 			PageSize: opsAccountsPageSize,
 		}, UserListFilters{
-			Status: StatusActive,
+			Status:               StatusActive,
+			IncludeSubscriptions: &noSubs,
 		})
 		if err != nil {
 			return nil, err

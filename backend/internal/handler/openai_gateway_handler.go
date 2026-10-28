@@ -2342,7 +2342,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 				reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
-		return wrapReleaseOnDone(ctx, selection.ReleaseFunc), openAISlotAcquireOK
+		return h.openAISlotWithGroupGate(ctx, selection, wrapReleaseOnDone(ctx, selection.ReleaseFunc), writeError), openAISlotAcquireOK
 	}
 	if selection.WaitPlan == nil {
 		markOpsRoutingCapacityLimited(c)
@@ -2377,7 +2377,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
 			reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
-		return wrapReleaseOnDone(ctx, fastReleaseFunc), openAISlotAcquireOK
+		return h.openAISlotWithGroupGate(ctx, selection, wrapReleaseOnDone(ctx, fastReleaseFunc), writeError), openAISlotAcquireOK
 	}
 
 	canWait, waitErr := h.concurrencyHelper.IncrementAccountWaitCount(ctx, account.ID, selection.WaitPlan.MaxWaiting)
@@ -2433,7 +2433,32 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
 		reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	}
-	return wrapReleaseOnDone(ctx, accountReleaseFunc), openAISlotAcquireOK
+	return h.openAISlotWithGroupGate(ctx, selection, wrapReleaseOnDone(ctx, accountReleaseFunc), writeError), openAISlotAcquireOK
+}
+
+// openAISlotWithGroupGate applies the whole-group concurrency gate to an already
+// owned account release. On success it returns the combined release; on failure it
+// releases the account slot, writes the mapped error response and returns nil.
+func (h *OpenAIGatewayHandler) openAISlotWithGroupGate(
+	ctx context.Context,
+	selection *service.AccountSelectionResult,
+	accountRelease func(),
+	writeError openAISlotErrorWriter,
+) func() {
+	if h == nil || h.concurrencyHelper == nil || selection == nil {
+		return accountRelease
+	}
+	combined, err := h.concurrencyHelper.EnforceGroupGate(ctx, selection, accountRelease)
+	if err != nil {
+		// EnforceGroupGate 拒绝时不会释放 accountRelease，这里必须回收账号槽位。
+		if accountRelease != nil {
+			accountRelease()
+		}
+		status, errType, code, message := concurrencyErrorResponse(err, "group")
+		writeError(status, errType, code, message)
+		return nil
+	}
+	return combined
 }
 
 // ResponsesWebSocket handles OpenAI Responses API WebSocket ingress endpoint

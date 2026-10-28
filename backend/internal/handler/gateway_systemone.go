@@ -193,6 +193,10 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 		}
 		account = latest
 		accountRelease = wrapReleaseOnDone(c.Request.Context(), accountRelease)
+		accountRelease = h.gatewaySlotWithGroupGate(c, selection, accountRelease, false)
+		if accountRelease == nil {
+			return
+		}
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 		service.SetOpsUpstreamModel(c, model)
 

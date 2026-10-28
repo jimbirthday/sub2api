@@ -281,6 +281,12 @@ func (Group) Fields() []ent.Field {
 			Default(0).
 			Comment("分组 RPM 上限，0 表示不限制；设置后接管该分组用户的限流"),
 
+		// 分组整体并发上限（0 = 不限制）。设置后该分组下所有请求共享
+		// concurrency:group:{group_id} 槽位，超过即排队/拒绝。
+		field.Int("max_concurrency").
+			Default(0).
+			Comment("分组整体并发上限，0 表示不限制；>0 时该分组所有请求共享此并发闸门"),
+
 		// OpenAI/Codex 请求的推理强度上限（空字符串表示不限制）。
 		field.String("max_reasoning_effort").
 			MaxLen(20).

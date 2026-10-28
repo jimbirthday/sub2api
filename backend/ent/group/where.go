@@ -320,6 +320,11 @@ func RpmLimit(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldRpmLimit, v))
 }
 
+// MaxConcurrency applies equality check predicate on the "max_concurrency" field. It's identical to MaxConcurrencyEQ.
+func MaxConcurrency(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldMaxConcurrency, v))
+}
+
 // MaxReasoningEffort applies equality check predicate on the "max_reasoning_effort" field. It's identical to MaxReasoningEffortEQ.
 func MaxReasoningEffort(v string) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldMaxReasoningEffort, v))
@@ -2428,6 +2433,46 @@ func RpmLimitLT(v int) predicate.Group {
 // RpmLimitLTE applies the LTE predicate on the "rpm_limit" field.
 func RpmLimitLTE(v int) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldRpmLimit, v))
+}
+
+// MaxConcurrencyEQ applies the EQ predicate on the "max_concurrency" field.
+func MaxConcurrencyEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldMaxConcurrency, v))
+}
+
+// MaxConcurrencyNEQ applies the NEQ predicate on the "max_concurrency" field.
+func MaxConcurrencyNEQ(v int) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldMaxConcurrency, v))
+}
+
+// MaxConcurrencyIn applies the In predicate on the "max_concurrency" field.
+func MaxConcurrencyIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldMaxConcurrency, vs...))
+}
+
+// MaxConcurrencyNotIn applies the NotIn predicate on the "max_concurrency" field.
+func MaxConcurrencyNotIn(vs ...int) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldMaxConcurrency, vs...))
+}
+
+// MaxConcurrencyGT applies the GT predicate on the "max_concurrency" field.
+func MaxConcurrencyGT(v int) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldMaxConcurrency, v))
+}
+
+// MaxConcurrencyGTE applies the GTE predicate on the "max_concurrency" field.
+func MaxConcurrencyGTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldMaxConcurrency, v))
+}
+
+// MaxConcurrencyLT applies the LT predicate on the "max_concurrency" field.
+func MaxConcurrencyLT(v int) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldMaxConcurrency, v))
+}
+
+// MaxConcurrencyLTE applies the LTE predicate on the "max_concurrency" field.
+func MaxConcurrencyLTE(v int) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldMaxConcurrency, v))
 }
 
 // MaxReasoningEffortEQ applies the EQ predicate on the "max_reasoning_effort" field.

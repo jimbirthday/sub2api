@@ -10,10 +10,14 @@ type GroupCapacitySummary struct {
 	GroupID         int64 `json:"group_id"`
 	ConcurrencyUsed int   `json:"concurrency_used"`
 	ConcurrencyMax  int   `json:"concurrency_max"`
-	SessionsUsed    int   `json:"sessions_used"`
-	SessionsMax     int   `json:"sessions_max"`
-	RPMUsed         int   `json:"rpm_used"`
-	RPMMax          int   `json:"rpm_max"`
+	// GroupConcurrencyUsed/Max 是分组整体并发闸门（groups.max_concurrency）的
+	// 真实占用与上限。未配置闸门时为 0；配置后这两个字段优先代表分组级口径。
+	GroupConcurrencyUsed int `json:"group_concurrency_used"`
+	GroupConcurrencyMax  int `json:"group_concurrency_max"`
+	SessionsUsed         int `json:"sessions_used"`
+	SessionsMax          int `json:"sessions_max"`
+	RPMUsed              int `json:"rpm_used"`
+	RPMMax               int `json:"rpm_max"`
 }
 
 // GroupAccountCapacityRow is the lightweight account projection needed for
@@ -69,11 +73,55 @@ func (s *GroupCapacityService) GetAllGroupCapacity(ctx context.Context) ([]Group
 		return nil, err
 	}
 
+	var results []GroupCapacitySummary
 	if lister, ok := s.accountRepo.(groupCapacityAccountLister); ok {
-		return s.getGroupCapacitiesBatch(ctx, groupIDs, lister)
+		results, err = s.getGroupCapacitiesBatch(ctx, groupIDs, lister)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		results = s.getGroupCapacitiesSequential(ctx, groupIDs)
 	}
 
-	return s.getGroupCapacitiesSequential(ctx, groupIDs), nil
+	s.enrichGroupConcurrency(ctx, results)
+	return results, nil
+}
+
+// enrichGroupConcurrency fills the whole-group gate usage/max for groups that
+// have groups.max_concurrency configured. Group config lookups use the lite
+// projection; a failure leaves the account-summed fields untouched (fail-open).
+func (s *GroupCapacityService) enrichGroupConcurrency(ctx context.Context, results []GroupCapacitySummary) {
+	if s == nil || s.groupRepo == nil || s.concurrencyService == nil || len(results) == 0 {
+		return
+	}
+	maxByID := make(map[int64]int, len(results))
+	gatedIDs := make([]int64, 0, len(results))
+	for _, r := range results {
+		if r.GroupID <= 0 {
+			continue
+		}
+		g, err := s.groupRepo.GetByIDLite(ctx, r.GroupID)
+		if err != nil || g == nil || g.MaxConcurrency <= 0 {
+			continue
+		}
+		maxByID[g.ID] = g.MaxConcurrency
+		gatedIDs = append(gatedIDs, g.ID)
+	}
+	if len(gatedIDs) == 0 {
+		return
+	}
+
+	used, err := s.concurrencyService.GetGroupConcurrencyBatch(ctx, gatedIDs)
+	if err != nil {
+		return
+	}
+	for i := range results {
+		r := &results[i]
+		if max, ok := maxByID[r.GroupID]; ok {
+			r.GroupConcurrencyMax = max
+			r.GroupConcurrencyUsed = used[r.GroupID]
+		}
+	}
 }
 
 func (s *GroupCapacityService) listActiveGroupIDs(ctx context.Context) ([]int64, error) {

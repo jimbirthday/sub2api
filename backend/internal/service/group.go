@@ -117,6 +117,10 @@ type Group struct {
 	// 一旦设置即接管该分组用户的限流（覆盖用户级 rpm_limit），可被 user-group rpm_override 进一步覆盖。
 	RPMLimit int
 
+	// MaxConcurrency 分组整体并发上限（0 = 不限制）。
+	// 设置后该分组下所有请求共享 concurrency:group:{group_id} 槽位。
+	MaxConcurrency int
+
 	// MaxReasoningEffort limits the effective Anthropic/OpenAI reasoning effort.
 	// Empty means unlimited; supported values are minimal/low/medium/high/xhigh/max.
 	MaxReasoningEffort string

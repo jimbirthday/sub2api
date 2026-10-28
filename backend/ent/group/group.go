@@ -138,6 +138,8 @@ const (
 	FieldCodexModelsManifestConfig = "codex_models_manifest_config"
 	// FieldRpmLimit holds the string denoting the rpm_limit field in the database.
 	FieldRpmLimit = "rpm_limit"
+	// FieldMaxConcurrency holds the string denoting the max_concurrency field in the database.
+	FieldMaxConcurrency = "max_concurrency"
 	// FieldMaxReasoningEffort holds the string denoting the max_reasoning_effort field in the database.
 	FieldMaxReasoningEffort = "max_reasoning_effort"
 	// FieldMaxReasoningEffortOverLimit holds the string denoting the max_reasoning_effort_over_limit field in the database.
@@ -286,6 +288,7 @@ var Columns = []string{
 	FieldModelAllowlist,
 	FieldCodexModelsManifestConfig,
 	FieldRpmLimit,
+	FieldMaxConcurrency,
 	FieldMaxReasoningEffort,
 	FieldMaxReasoningEffortOverLimit,
 	FieldReasoningEffortMappings,
@@ -423,6 +426,8 @@ var (
 	DefaultCodexModelsManifestConfig domain.GroupCodexModelsManifestConfig
 	// DefaultRpmLimit holds the default value on creation for the "rpm_limit" field.
 	DefaultRpmLimit int
+	// DefaultMaxConcurrency holds the default value on creation for the "max_concurrency" field.
+	DefaultMaxConcurrency int
 	// DefaultMaxReasoningEffort holds the default value on creation for the "max_reasoning_effort" field.
 	DefaultMaxReasoningEffort string
 	// MaxReasoningEffortValidator is a validator for the "max_reasoning_effort" field. It is called by the builders before save.
@@ -712,6 +717,11 @@ func ByDefaultMappedModel(opts ...sql.OrderTermOption) OrderOption {
 // ByRpmLimit orders the results by the rpm_limit field.
 func ByRpmLimit(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRpmLimit, opts...).ToFunc()
+}
+
+// ByMaxConcurrency orders the results by the max_concurrency field.
+func ByMaxConcurrency(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMaxConcurrency, opts...).ToFunc()
 }
 
 // ByMaxReasoningEffort orders the results by the max_reasoning_effort field.

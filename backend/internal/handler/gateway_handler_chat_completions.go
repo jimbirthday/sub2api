@@ -277,6 +277,10 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			}
 		}
 		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
+		accountReleaseFunc = h.gatewaySlotWithGroupGate(c, selection, accountReleaseFunc, streamStarted)
+		if accountReleaseFunc == nil {
+			return
+		}
 
 		if groupPlatform == service.PlatformGemini && account.Platform != service.PlatformGemini {
 			if accountReleaseFunc != nil {

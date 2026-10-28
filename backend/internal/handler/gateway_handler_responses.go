@@ -276,6 +276,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			}
 		}
 		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
+		accountReleaseFunc = h.gatewaySlotWithGroupGate(c, selection, accountReleaseFunc, streamStarted)
+		if accountReleaseFunc == nil {
+			return
+		}
 
 		// 5. Forward request
 		writerSizeBeforeForward := c.Writer.Size()

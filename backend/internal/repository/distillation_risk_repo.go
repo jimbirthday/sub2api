@@ -122,6 +122,10 @@ func (r *distillationRiskRepository) ListSealedAggregates(ctx context.Context, r
   FROM logical_attempts GROUP BY user_id, bucket, cohort, FLOOR(EXTRACT(EPOCH FROM (started_at - bucket))/10)::int
 ), rate_summary AS (
   SELECT user_id,bucket,cohort,
+         -- Saturation thresholds are measured against the user's own configured
+         -- limits. Below a configured RPM of 30 the minimum floor (10 ops per
+         -- 10-second bucket) is the binding threshold; an unconfigured (0) RPM
+         -- keeps a conservative 20 ops/bucket floor.
          AVG(CASE WHEN operation_count >= CASE WHEN configured_rpm > 0 THEN GREATEST(10, CEIL(0.8 * configured_rpm::double precision / 6)) ELSE 20 END THEN 1.0 ELSE 0.0 END) AS request_rate_saturation
   FROM rate_buckets GROUP BY user_id,bucket,cohort
 ), token_samples AS (
@@ -160,7 +164,11 @@ func (r *distillationRiskRepository) ListSealedAggregates(ctx context.Context, r
   FROM concurrency_events GROUP BY user_id,bucket,cohort,at
 ), concurrency_summary AS (
   SELECT user_id,bucket,cohort,
-    SUM(CASE WHEN running >= CASE WHEN cap > 0 THEN GREATEST(4,CEIL(0.8*cap)) ELSE 8 END THEN EXTRACT(EPOCH FROM next_at-at) ELSE 0 END)
+    -- "Saturated" means six or more concurrent operations sustained while a
+    -- configured cap would only count at 80% of its own limit. The six-floor
+    -- prevents tiny configured limits (or unlimited users) from tripping the
+    -- signal on a handful of ordinary concurrent requests.
+    SUM(CASE WHEN running >= CASE WHEN cap > 0 THEN GREATEST(6,CEIL(0.8*cap)) ELSE 6 END THEN EXTRACT(EPOCH FROM next_at-at) ELSE 0 END)
     / NULLIF(SUM(CASE WHEN running > 0 THEN EXTRACT(EPOCH FROM next_at-at) ELSE 0 END),0) AS saturation
   FROM concurrency_steps GROUP BY user_id,bucket,cohort
 ), telemetry AS (
@@ -232,7 +240,9 @@ LIMIT $3`, now.UTC(), ruleVersion, limit)
 			a.TokenBaselineSamples = samples.Int64
 		}
 		a.PromptRepeatEligible = a.PromptRepeatRatio != nil
-		a.StrongSignal = (a.RequestRateSaturation != nil && *a.RequestRateSaturation >= 0.2) || (a.ConcurrencySaturation != nil && *a.ConcurrencySaturation >= 0.5) || a.TokenFamilyThroughputHit
+		// StrongSignal is derived by the scoring layer from the configured
+		// scoring thresholds; keeping a hardcoded copy here would drift when
+		// the scoring config changes. The service recomputes it per window.
 		result = append(result, a)
 	}
 	return result, rows.Err()
@@ -329,8 +339,10 @@ VALUES($1,'clear','none',1,$2,$2) ON CONFLICT (user_id) DO NOTHING`, e.UserID, n
 		}
 	} else {
 		// Partial evidence may begin observation, but it cannot advance a
-		// sanction or recovery sequence.
-		next.SuspectedStreak, next.LimitedStreak, next.RecoveryStreak = 0, 0, 0
+		// sanction sequence. A gap must also never reset an in-progress
+		// recovery chain, otherwise a single dropped telemetry event keeps a
+		// recovered user trapped in a restricted/suspected state.
+		next.SuspectedStreak, next.LimitedStreak = 0, 0
 		if *e.Score >= 60 && current.State == service.DistillationStateClear {
 			next.State = service.DistillationStateObserving
 		}

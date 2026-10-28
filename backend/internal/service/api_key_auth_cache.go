@@ -140,6 +140,10 @@ type APIKeyAuthGroupSnapshot struct {
 	ProfitControlEnabled bool    `json:"profit_control_enabled"`
 	ProfitMinMargin      float64 `json:"profit_min_margin"`
 	ProfitSafetyBuffer   float64 `json:"profit_safety_buffer"`
+
+	// MaxConcurrency 分组整体并发上限（0=不限制）。直连热路径的调度分组闸门
+	// 直接读本快照物化出的 Group；漏填会让闸门拿到零值而静默关闭。
+	MaxConcurrency int `json:"max_concurrency,omitempty"`
 }
 
 // APIKeyAuthCacheEntry 缓存条目，支持负缓存

@@ -1128,6 +1128,27 @@ func (_u *GroupUpdate) AddRpmLimit(v int) *GroupUpdate {
 	return _u
 }
 
+// SetMaxConcurrency sets the "max_concurrency" field.
+func (_u *GroupUpdate) SetMaxConcurrency(v int) *GroupUpdate {
+	_u.mutation.ResetMaxConcurrency()
+	_u.mutation.SetMaxConcurrency(v)
+	return _u
+}
+
+// SetNillableMaxConcurrency sets the "max_concurrency" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableMaxConcurrency(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetMaxConcurrency(*v)
+	}
+	return _u
+}
+
+// AddMaxConcurrency adds value to the "max_concurrency" field.
+func (_u *GroupUpdate) AddMaxConcurrency(v int) *GroupUpdate {
+	_u.mutation.AddMaxConcurrency(v)
+	return _u
+}
+
 // SetMaxReasoningEffort sets the "max_reasoning_effort" field.
 func (_u *GroupUpdate) SetMaxReasoningEffort(v string) *GroupUpdate {
 	_u.mutation.SetMaxReasoningEffort(v)
@@ -1896,6 +1917,12 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(group.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.MaxConcurrency(); ok {
+		_spec.SetField(group.FieldMaxConcurrency, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedMaxConcurrency(); ok {
+		_spec.AddField(group.FieldMaxConcurrency, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.MaxReasoningEffort(); ok {
 		_spec.SetField(group.FieldMaxReasoningEffort, field.TypeString, value)
@@ -3331,6 +3358,27 @@ func (_u *GroupUpdateOne) AddRpmLimit(v int) *GroupUpdateOne {
 	return _u
 }
 
+// SetMaxConcurrency sets the "max_concurrency" field.
+func (_u *GroupUpdateOne) SetMaxConcurrency(v int) *GroupUpdateOne {
+	_u.mutation.ResetMaxConcurrency()
+	_u.mutation.SetMaxConcurrency(v)
+	return _u
+}
+
+// SetNillableMaxConcurrency sets the "max_concurrency" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableMaxConcurrency(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetMaxConcurrency(*v)
+	}
+	return _u
+}
+
+// AddMaxConcurrency adds value to the "max_concurrency" field.
+func (_u *GroupUpdateOne) AddMaxConcurrency(v int) *GroupUpdateOne {
+	_u.mutation.AddMaxConcurrency(v)
+	return _u
+}
+
 // SetMaxReasoningEffort sets the "max_reasoning_effort" field.
 func (_u *GroupUpdateOne) SetMaxReasoningEffort(v string) *GroupUpdateOne {
 	_u.mutation.SetMaxReasoningEffort(v)
@@ -4129,6 +4177,12 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedRpmLimit(); ok {
 		_spec.AddField(group.FieldRpmLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.MaxConcurrency(); ok {
+		_spec.SetField(group.FieldMaxConcurrency, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedMaxConcurrency(); ok {
+		_spec.AddField(group.FieldMaxConcurrency, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.MaxReasoningEffort(); ok {
 		_spec.SetField(group.FieldMaxReasoningEffort, field.TypeString, value)

@@ -623,7 +623,12 @@ func (h *GatewayHandler) acquireGeminiCachedContentAccountSlot(c *gin.Context, r
 		if release == nil {
 			release = func() {}
 		}
-		return wrapReleaseOnDone(c.Request.Context(), release), true
+		release = wrapReleaseOnDone(c.Request.Context(), release)
+		release = h.gatewaySlotWithGroupGate(c, selection, release, false)
+		if release == nil {
+			return nil, false
+		}
+		return release, true
 	}
 	account := selection.Account
 	if selection.WaitPlan == nil {
@@ -651,7 +656,12 @@ func (h *GatewayHandler) acquireGeminiCachedContentAccountSlot(c *gin.Context, r
 	if release == nil {
 		release = func() {}
 	}
-	return wrapReleaseOnDone(c.Request.Context(), release), true
+	release = wrapReleaseOnDone(c.Request.Context(), release)
+	release = h.gatewaySlotWithGroupGate(c, selection, release, false)
+	if release == nil {
+		return nil, false
+	}
+	return release, true
 }
 
 // submitGeminiCachedContentUsage 记录缓存创建 / 延长的计费：inputTokens 按输入价计，storageTokenHours 按计费模型的存储单价计；

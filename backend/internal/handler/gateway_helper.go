@@ -264,6 +264,70 @@ func (h *ConcurrencyHelper) TryAcquireAccountSlot(ctx context.Context, accountID
 	return result.ReleaseFunc, true, nil
 }
 
+// TryAcquireGroupSlot 尝试立即获取分组整体并发槽位。
+// groupID <= 0 或 maxConcurrency <= 0 时直接放行（fail-open）。
+// 返回值: (releaseFunc, acquired, error)
+func (h *ConcurrencyHelper) TryAcquireGroupSlot(ctx context.Context, groupID int64, maxConcurrency int) (func(), bool, error) {
+	if groupID <= 0 || maxConcurrency <= 0 || h == nil || h.concurrencyService == nil {
+		return func() {}, true, nil
+	}
+	result, err := h.concurrencyService.AcquireGroupSlot(ctx, groupID, maxConcurrency)
+	if err != nil {
+		return nil, false, err
+	}
+	if !result.Acquired {
+		return nil, false, nil
+	}
+	return result.ReleaseFunc, true, nil
+}
+
+// AcquireGroupSlotWithWait acquires a whole-group concurrency slot, waiting if
+// necessary. Streaming requests receive ping events during the wait.
+func (h *ConcurrencyHelper) AcquireGroupSlotWithWait(c *gin.Context, groupID int64, maxConcurrency int, isStream bool, streamStarted *bool) (func(), error) {
+	if groupID <= 0 || maxConcurrency <= 0 {
+		return func() {}, nil
+	}
+	return h.waitForSlotWithPingTimeout(c, "group", groupID, maxConcurrency, maxConcurrencyWait, isStream, streamStarted, true)
+}
+
+// EnforceGroupGate reserves one whole-group concurrency slot for this request and
+// chains its release into the provided account release. It is designed to be called
+// right after the account slot is owned and profit admission has passed, so the
+// group slot is released by every existing account-release point (veto, failover
+// continue, after forward). Returns the combined release function.
+//
+// When the group gate rejects the request it returns &ConcurrencyError{SlotType:
+// "group"} WITHOUT releasing accountRelease: callers keep ownership and must
+// release it before writing the 429 response.
+func (h *ConcurrencyHelper) EnforceGroupGate(ctx context.Context, selection *service.AccountSelectionResult, accountRelease func()) (func(), error) {
+	if selection == nil {
+		return accountRelease, nil
+	}
+	groupID, maxConcurrency := selection.SchedulingGroupGate()
+	if groupID <= 0 || maxConcurrency <= 0 {
+		return accountRelease, nil
+	}
+	if h == nil || h.concurrencyService == nil {
+		return accountRelease, nil
+	}
+	result, err := h.concurrencyService.AcquireGroupSlot(ctx, groupID, maxConcurrency)
+	if err != nil {
+		return nil, err
+	}
+	if !result.Acquired {
+		return nil, &ConcurrencyError{SlotType: "group"}
+	}
+	groupRelease := result.ReleaseFunc
+	return func() {
+		if accountRelease != nil {
+			accountRelease()
+		}
+		if groupRelease != nil {
+			groupRelease()
+		}
+	}, nil
+}
+
 // AcquireUserSlotWithWait acquires a user concurrency slot, waiting if necessary.
 // For streaming requests, sends ping events during the wait.
 // streamStarted is updated if streaming response has begun.
@@ -288,7 +352,11 @@ func (h *ConcurrencyHelper) acquireUserSlotWithWaitTimeout(c *gin.Context, userI
 		return h.withAPIKeySlotFromGin(c, releaseFunc), nil
 	}
 
-	queueLimit := service.CalculateMaxWait(maxConcurrency) - maxConcurrency
+	// The slot cap actually enforced by AcquireUserSlot may be lower than the
+	// configured value when a distillation risk restriction applies. Size the
+	// wait queue from the effective cap so waiters match the real slot count.
+	effectiveConcurrency := h.concurrencyService.EffectiveUserConcurrency(ctx, userID, maxConcurrency)
+	queueLimit := service.CalculateMaxWait(effectiveConcurrency) - effectiveConcurrency
 	if queueLimit < 1 {
 		queueLimit = 1
 	}
@@ -371,10 +439,14 @@ func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType 
 	defer cancel()
 
 	acquireSlot := func() (*service.AcquireResult, error) {
-		if slotType == "user" {
+		switch slotType {
+		case "user":
 			return h.concurrencyService.AcquireUserSlot(ctx, id, maxConcurrency)
+		case "group":
+			return h.concurrencyService.AcquireGroupSlot(ctx, id, maxConcurrency)
+		default:
+			return h.concurrencyService.AcquireAccountSlot(ctx, id, maxConcurrency)
 		}
-		return h.concurrencyService.AcquireAccountSlot(ctx, id, maxConcurrency)
 	}
 
 	if tryImmediate {

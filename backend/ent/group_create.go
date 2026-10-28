@@ -836,6 +836,20 @@ func (_c *GroupCreate) SetNillableRpmLimit(v *int) *GroupCreate {
 	return _c
 }
 
+// SetMaxConcurrency sets the "max_concurrency" field.
+func (_c *GroupCreate) SetMaxConcurrency(v int) *GroupCreate {
+	_c.mutation.SetMaxConcurrency(v)
+	return _c
+}
+
+// SetNillableMaxConcurrency sets the "max_concurrency" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableMaxConcurrency(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetMaxConcurrency(*v)
+	}
+	return _c
+}
+
 // SetMaxReasoningEffort sets the "max_reasoning_effort" field.
 func (_c *GroupCreate) SetMaxReasoningEffort(v string) *GroupCreate {
 	_c.mutation.SetMaxReasoningEffort(v)
@@ -1197,6 +1211,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultRpmLimit
 		_c.mutation.SetRpmLimit(v)
 	}
+	if _, ok := _c.mutation.MaxConcurrency(); !ok {
+		v := group.DefaultMaxConcurrency
+		_c.mutation.SetMaxConcurrency(v)
+	}
 	if _, ok := _c.mutation.MaxReasoningEffort(); !ok {
 		v := group.DefaultMaxReasoningEffort
 		_c.mutation.SetMaxReasoningEffort(v)
@@ -1402,6 +1420,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.RpmLimit(); !ok {
 		return &ValidationError{Name: "rpm_limit", err: errors.New(`ent: missing required field "Group.rpm_limit"`)}
+	}
+	if _, ok := _c.mutation.MaxConcurrency(); !ok {
+		return &ValidationError{Name: "max_concurrency", err: errors.New(`ent: missing required field "Group.max_concurrency"`)}
 	}
 	if _, ok := _c.mutation.MaxReasoningEffort(); !ok {
 		return &ValidationError{Name: "max_reasoning_effort", err: errors.New(`ent: missing required field "Group.max_reasoning_effort"`)}
@@ -1701,6 +1722,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RpmLimit(); ok {
 		_spec.SetField(group.FieldRpmLimit, field.TypeInt, value)
 		_node.RpmLimit = value
+	}
+	if value, ok := _c.mutation.MaxConcurrency(); ok {
+		_spec.SetField(group.FieldMaxConcurrency, field.TypeInt, value)
+		_node.MaxConcurrency = value
 	}
 	if value, ok := _c.mutation.MaxReasoningEffort(); ok {
 		_spec.SetField(group.FieldMaxReasoningEffort, field.TypeString, value)
@@ -2863,6 +2888,24 @@ func (u *GroupUpsert) UpdateRpmLimit() *GroupUpsert {
 // AddRpmLimit adds v to the "rpm_limit" field.
 func (u *GroupUpsert) AddRpmLimit(v int) *GroupUpsert {
 	u.Add(group.FieldRpmLimit, v)
+	return u
+}
+
+// SetMaxConcurrency sets the "max_concurrency" field.
+func (u *GroupUpsert) SetMaxConcurrency(v int) *GroupUpsert {
+	u.Set(group.FieldMaxConcurrency, v)
+	return u
+}
+
+// UpdateMaxConcurrency sets the "max_concurrency" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateMaxConcurrency() *GroupUpsert {
+	u.SetExcluded(group.FieldMaxConcurrency)
+	return u
+}
+
+// AddMaxConcurrency adds v to the "max_concurrency" field.
+func (u *GroupUpsert) AddMaxConcurrency(v int) *GroupUpsert {
+	u.Add(group.FieldMaxConcurrency, v)
 	return u
 }
 
@@ -4143,6 +4186,27 @@ func (u *GroupUpsertOne) AddRpmLimit(v int) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateRpmLimit() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateRpmLimit()
+	})
+}
+
+// SetMaxConcurrency sets the "max_concurrency" field.
+func (u *GroupUpsertOne) SetMaxConcurrency(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetMaxConcurrency(v)
+	})
+}
+
+// AddMaxConcurrency adds v to the "max_concurrency" field.
+func (u *GroupUpsertOne) AddMaxConcurrency(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddMaxConcurrency(v)
+	})
+}
+
+// UpdateMaxConcurrency sets the "max_concurrency" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateMaxConcurrency() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateMaxConcurrency()
 	})
 }
 
@@ -5603,6 +5667,27 @@ func (u *GroupUpsertBulk) AddRpmLimit(v int) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateRpmLimit() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateRpmLimit()
+	})
+}
+
+// SetMaxConcurrency sets the "max_concurrency" field.
+func (u *GroupUpsertBulk) SetMaxConcurrency(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetMaxConcurrency(v)
+	})
+}
+
+// AddMaxConcurrency adds v to the "max_concurrency" field.
+func (u *GroupUpsertBulk) AddMaxConcurrency(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddMaxConcurrency(v)
+	})
+}
+
+// UpdateMaxConcurrency sets the "max_concurrency" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateMaxConcurrency() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateMaxConcurrency()
 	})
 }
 

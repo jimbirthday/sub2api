@@ -61,6 +61,16 @@ type APIKeyConcurrencyCache interface {
 	GetAPIKeyConcurrencyBatch(ctx context.Context, apiKeyIDs []int64) (map[int64]int, error)
 }
 
+// GroupConcurrencyCache owns the per-group total concurrency slot. A positive
+// groups.max_concurrency turns this into a shared gate for every request that
+// belongs to the group, independent of the per-account/per-user slot.
+type GroupConcurrencyCache interface {
+	AcquireGroupSlot(ctx context.Context, groupID int64, maxConcurrency int, requestID string) (bool, error)
+	ReleaseGroupSlot(ctx context.Context, groupID int64, requestID string) error
+	GetGroupConcurrency(ctx context.Context, groupID int64) (int, error)
+	GetGroupConcurrencyBatch(ctx context.Context, groupIDs []int64) (map[int64]int, error)
+}
+
 // OpenAIWSIngressLeaseCache owns the short-lived distributed lease used to
 // bound live client WebSocket sessions. It is deliberately independent of the
 // request-slot namespace: idle ingress connections do not occupy turn slots.
@@ -234,8 +244,12 @@ const (
 	defaultExtraWaitSlots = 20
 
 	defaultAccountLoadBatchCacheTTL = 200 * time.Millisecond
+	// userLoadBatchCacheTTL 是用户并发看板批量读的极短 TTL 缓存；看板轮询频率
+	// 高、用户数大，缓存 + singleflight 可避免每轮打穿 Redis 的 user:* 键。
+	userLoadBatchCacheTTL           = 500 * time.Millisecond
 	accountLoadBatchFetchTimeout    = 3 * time.Second
 	maxAccountLoadBatchCacheEntries = 256
+	maxUserLoadBatchCacheEntries    = 256
 	apiKeyConcurrencyFetchTimeout   = 3 * time.Second
 	apiKeySlotTrackTimeout          = 2 * time.Second
 )
@@ -249,6 +263,10 @@ type ConcurrencyService struct {
 	accountLoadCacheMu  sync.RWMutex
 	accountLoadCache    map[string]cachedAccountLoadBatch
 	accountLoadGroup    singleflight.Group
+
+	userLoadCacheMu sync.RWMutex
+	userLoadCache   map[string]cachedUserLoadBatch
+	userLoadGroup   singleflight.Group
 }
 
 func (s *ConcurrencyService) SetDistillationRiskService(risk *DistillationRiskService) {
@@ -272,8 +290,80 @@ func (s *ConcurrencyService) GetUserConcurrency(ctx context.Context, userID int6
 	return s.cache.GetUserConcurrency(ctx, userID)
 }
 
+// AcquireGroupSlot atomically reserves one slot of a group's total concurrency
+// budget. maxConcurrency <= 0 disables the group gate (fail-open).
+func (s *ConcurrencyService) AcquireGroupSlot(ctx context.Context, groupID int64, maxConcurrency int) (*AcquireResult, error) {
+	if maxConcurrency <= 0 {
+		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
+	}
+	if s == nil || s.cache == nil || groupID <= 0 {
+		return nil, errors.New("concurrency cache unavailable")
+	}
+	cache, ok := s.cache.(GroupConcurrencyCache)
+	if !ok {
+		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
+	}
+	requestID := generateRequestID()
+	acquired, err := cache.AcquireGroupSlot(ctx, groupID, maxConcurrency, requestID)
+	if err != nil {
+		return nil, err
+	}
+	if !acquired {
+		return &AcquireResult{Acquired: false, ReleaseFunc: nil}, nil
+	}
+	return &AcquireResult{Acquired: true, ReleaseFunc: func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := cache.ReleaseGroupSlot(bgCtx, groupID, requestID); err != nil {
+			logger.LegacyPrintf("service.concurrency", "Warning: failed to release group slot for %d (req=%s): %v", groupID, requestID, err)
+		}
+	}}, nil
+}
+
+// GetGroupConcurrency returns the current in-flight slot count for a group.
+func (s *ConcurrencyService) GetGroupConcurrency(ctx context.Context, groupID int64) (int, error) {
+	if s == nil || s.cache == nil || groupID <= 0 {
+		return 0, errors.New("concurrency cache unavailable")
+	}
+	cache, ok := s.cache.(GroupConcurrencyCache)
+	if !ok {
+		return 0, nil
+	}
+	return cache.GetGroupConcurrency(ctx, groupID)
+}
+
+// GetGroupConcurrencyBatch returns real-time slot counts for multiple groups.
+func (s *ConcurrencyService) GetGroupConcurrencyBatch(ctx context.Context, groupIDs []int64) (map[int64]int, error) {
+	if len(groupIDs) == 0 {
+		return map[int64]int{}, nil
+	}
+	if s == nil || s.cache == nil {
+		result := make(map[int64]int, len(groupIDs))
+		for _, id := range groupIDs {
+			result[id] = 0
+		}
+		return result, nil
+	}
+	cache, ok := s.cache.(GroupConcurrencyCache)
+	if !ok {
+		result := make(map[int64]int, len(groupIDs))
+		for _, id := range groupIDs {
+			result[id] = 0
+		}
+		return result, nil
+	}
+	redisCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	return cache.GetGroupConcurrencyBatch(redisCtx, groupIDs)
+}
+
 type cachedAccountLoadBatch struct {
 	loadMap   map[int64]*AccountLoadInfo
+	expiresAt time.Time
+}
+
+type cachedUserLoadBatch struct {
+	loadMap   map[int64]*UserLoadInfo
 	expiresAt time.Time
 }
 
@@ -282,6 +372,7 @@ func NewConcurrencyService(cache ConcurrencyCache) *ConcurrencyService {
 	svc := &ConcurrencyService{
 		cache:            cache,
 		accountLoadCache: make(map[string]cachedAccountLoadBatch),
+		userLoadCache:    make(map[string]cachedUserLoadBatch),
 	}
 	svc.SetAccountLoadBatchCacheTTL(defaultAccountLoadBatchCacheTTL)
 	return svc
@@ -357,6 +448,11 @@ type UserWithConcurrency struct {
 	MaxConcurrency int
 }
 
+type GroupWithConcurrency struct {
+	ID             int64
+	MaxConcurrency int
+}
+
 type AccountLoadInfo struct {
 	AccountID          int64
 	CurrentConcurrency int
@@ -368,6 +464,12 @@ type UserLoadInfo struct {
 	UserID             int64
 	CurrentConcurrency int
 	WaitingCount       int
+	LoadRate           int // 0-100+ (percent)
+}
+
+type GroupLoadInfo struct {
+	GroupID            int64
+	CurrentConcurrency int
 	LoadRate           int // 0-100+ (percent)
 }
 
@@ -410,18 +512,27 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 	}, nil
 }
 
+// EffectiveUserConcurrency applies the distillation risk cap (when present) to
+// the user's configured concurrency. The wait-queue sizing path uses the same
+// value so that queue capacity stays consistent with the real slot count.
+// A lookup error keeps the configured value (fail-open, matching the acquire path).
+func (s *ConcurrencyService) EffectiveUserConcurrency(ctx context.Context, userID int64, configuredConcurrency int) int {
+	if s == nil || s.distillationRisk == nil || userID <= 0 {
+		return configuredConcurrency
+	}
+	effective, _, err := s.distillationRisk.EffectiveLimits(ctx, userID, configuredConcurrency, 0, time.Now().UTC())
+	if err != nil {
+		logger.LegacyPrintf("service.concurrency", "Warning: behavior restriction lookup failed for user %d: %v", userID, err)
+		return configuredConcurrency
+	}
+	return effective
+}
+
 // AcquireUserSlot attempts to acquire a concurrency slot for a user.
 // If the user is at max concurrency, it waits until a slot is available or timeout.
 // Returns a release function that MUST be called when the request completes.
 func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int) (*AcquireResult, error) {
-	if s != nil && s.distillationRisk != nil {
-		effective, _, err := s.distillationRisk.EffectiveLimits(ctx, userID, maxConcurrency, 0, time.Now().UTC())
-		if err != nil {
-			logger.LegacyPrintf("service.concurrency", "Warning: behavior restriction lookup failed for user %d: %v", userID, err)
-		} else {
-			maxConcurrency = effective
-		}
-	}
+	maxConcurrency = s.EffectiveUserConcurrency(ctx, userID, maxConcurrency)
 	// If maxConcurrency is 0 or negative, no limit
 	if maxConcurrency <= 0 {
 		return &AcquireResult{
@@ -747,12 +858,136 @@ func cloneAccountLoadMap(loadMap map[int64]*AccountLoadInfo) map[int64]*AccountL
 	return clone
 }
 
-// GetUsersLoadBatch returns load info for multiple users.
+// GetUsersLoadBatch returns load info for multiple users. Like the account path,
+// it uses a short TTL cache + singleflight so the ops dashboard polling does not
+// hammer Redis with per-user ZCARD pipelines every refresh interval.
 func (s *ConcurrencyService) GetUsersLoadBatch(ctx context.Context, users []UserWithConcurrency) (map[int64]*UserLoadInfo, error) {
 	if s.cache == nil {
 		return map[int64]*UserLoadInfo{}, nil
 	}
-	return s.cache.GetUsersLoadBatch(ctx, users)
+	if len(users) == 0 {
+		return map[int64]*UserLoadInfo{}, nil
+	}
+	if s == nil {
+		return map[int64]*UserLoadInfo{}, nil
+	}
+
+	ttl := userLoadBatchCacheTTL
+	if ttl <= 0 {
+		return s.fetchUsersLoadBatch(ctx, users)
+	}
+
+	key := userLoadBatchCacheKey(users)
+	if cached, ok := s.getCachedUserLoadBatch(key, time.Now()); ok {
+		return cached, nil
+	}
+
+	value, err, _ := s.userLoadGroup.Do(key, func() (any, error) {
+		now := time.Now()
+		if cached, ok := s.getCachedUserLoadBatch(key, now); ok {
+			return cached, nil
+		}
+		loadMap, fetchErr := s.fetchUsersLoadBatch(ctx, users)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		cached := cloneUserLoadMap(loadMap)
+		s.storeCachedUserLoadBatch(key, cached, now.Add(ttl))
+		return cached, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	loadMap, _ := value.(map[int64]*UserLoadInfo)
+	if loadMap == nil {
+		return map[int64]*UserLoadInfo{}, nil
+	}
+	return loadMap, nil
+}
+
+func (s *ConcurrencyService) fetchUsersLoadBatch(ctx context.Context, users []UserWithConcurrency) (map[int64]*UserLoadInfo, error) {
+	if s.cache == nil {
+		return map[int64]*UserLoadInfo{}, nil
+	}
+	baseCtx := context.Background()
+	if ctx != nil {
+		baseCtx = context.WithoutCancel(ctx)
+	}
+	redisCtx, cancel := context.WithTimeout(baseCtx, accountLoadBatchFetchTimeout)
+	defer cancel()
+	return s.cache.GetUsersLoadBatch(redisCtx, users)
+}
+
+func (s *ConcurrencyService) getCachedUserLoadBatch(key string, now time.Time) (map[int64]*UserLoadInfo, bool) {
+	s.userLoadCacheMu.RLock()
+	cached, ok := s.userLoadCache[key]
+	s.userLoadCacheMu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	if !now.Before(cached.expiresAt) {
+		s.userLoadCacheMu.Lock()
+		if current, exists := s.userLoadCache[key]; exists && !now.Before(current.expiresAt) {
+			delete(s.userLoadCache, key)
+		}
+		s.userLoadCacheMu.Unlock()
+		return nil, false
+	}
+	return cached.loadMap, true
+}
+
+func (s *ConcurrencyService) storeCachedUserLoadBatch(key string, loadMap map[int64]*UserLoadInfo, expiresAt time.Time) {
+	s.userLoadCacheMu.Lock()
+	if s.userLoadCache == nil {
+		s.userLoadCache = make(map[string]cachedUserLoadBatch)
+	}
+	if len(s.userLoadCache) >= maxUserLoadBatchCacheEntries {
+		now := time.Now()
+		for cacheKey, cached := range s.userLoadCache {
+			if !now.Before(cached.expiresAt) {
+				delete(s.userLoadCache, cacheKey)
+			}
+		}
+		for len(s.userLoadCache) >= maxUserLoadBatchCacheEntries {
+			for cacheKey := range s.userLoadCache {
+				delete(s.userLoadCache, cacheKey)
+				break
+			}
+		}
+	}
+	s.userLoadCache[key] = cachedUserLoadBatch{
+		loadMap:   loadMap,
+		expiresAt: expiresAt,
+	}
+	s.userLoadCacheMu.Unlock()
+}
+
+func userLoadBatchCacheKey(users []UserWithConcurrency) string {
+	hash := sha256.New()
+	var buf [16]byte
+	for _, u := range users {
+		binary.LittleEndian.PutUint64(buf[:8], uint64(u.ID))
+		binary.LittleEndian.PutUint64(buf[8:], uint64(int64(u.MaxConcurrency)))
+		_, _ = hash.Write(buf[:])
+	}
+	sum := hash.Sum(nil)
+	return strconv.Itoa(len(users)) + ":u:" + hex.EncodeToString(sum)
+}
+
+func cloneUserLoadMap(loadMap map[int64]*UserLoadInfo) map[int64]*UserLoadInfo {
+	if len(loadMap) == 0 {
+		return map[int64]*UserLoadInfo{}
+	}
+	clone := make(map[int64]*UserLoadInfo, len(loadMap))
+	for userID, loadInfo := range loadMap {
+		if loadInfo == nil {
+			clone[userID] = nil
+			continue
+		}
+		copied := *loadInfo
+		clone[userID] = &copied
+	}
+	return clone
 }
 
 // CleanupExpiredAccountSlots removes expired slots for one account (background task).

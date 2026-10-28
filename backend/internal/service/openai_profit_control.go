@@ -280,6 +280,14 @@ func attachSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult)
 	if gate, ok := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); ok && gate != nil {
 		sel.profitGate = gate
 	}
+	// 记录本次调度真实生效的分组及其整体并发上限。调度栈内部的局部 ctx 已经把
+	// ctxkey.Group 换成解析后的分组（composite 为父分组、claude_code_only 为
+	// fallback 分组）；OpenAI 侧 ctxkey.Group 保持认证分组（composite 父分组），
+	// 两者都是分组整体并发闸门应当约束的对象。
+	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(group) {
+		sel.schedulingGroupID = group.ID
+		sel.schedulingGroupMaxConcurrency = group.MaxConcurrency
+	}
 	return sel
 }
 

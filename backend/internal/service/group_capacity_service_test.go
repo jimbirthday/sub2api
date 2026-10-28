@@ -30,6 +30,12 @@ func (s *groupCapacityGroupRepoStub) ListActiveIDs(context.Context) ([]int64, er
 	return append([]int64(nil), s.groupIDs...), nil
 }
 
+// GetByIDLite is used by the whole-group concurrency enrichment; the stub returns
+// a group with no gate configured (MaxConcurrency == 0) so enrichment is a no-op.
+func (s *groupCapacityGroupRepoStub) GetByIDLite(_ context.Context, id int64) (*Group, error) {
+	return &Group{ID: id, Platform: PlatformOpenAI, Status: StatusActive}, nil
+}
+
 type groupCapacityConcurrencyCacheStub struct {
 	ConcurrencyCache
 	counts    map[int64]int
