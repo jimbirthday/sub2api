@@ -786,6 +786,22 @@ export default {
         errorAccounts: 'Errors {count}',
         loadFailed: 'Failed to load concurrency data'
       },
+      userConcurrency: {
+        title: 'User Concurrency',
+        description: 'Real-time per-user concurrency usage across all active users',
+        empty: 'No user concurrency activity right now',
+        loadFailed: 'Failed to load user concurrency data',
+        collectedAt: 'Collected at:',
+        enabled: 'Realtime monitoring enabled',
+        disabled: 'Realtime monitoring is disabled in settings',
+        user: 'User',
+        username: 'Username',
+        email: 'Email',
+        currentInUse: 'In Use',
+        maxCapacity: 'Capacity',
+        waitingInQueue: 'Waiting',
+        loadPercentage: 'Load'
+      },
       realtime: {
         title: 'Realtime',
         connected: 'Realtime connected',

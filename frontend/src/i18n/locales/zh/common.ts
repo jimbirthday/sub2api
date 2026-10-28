@@ -187,6 +187,7 @@ export default {
     proxies: 'IP管理',
     redeemCodes: '兑换码',
     ops: '运维监控',
+    userConcurrency: '用户并发',
     promoCodes: '优惠码',
     settings: '系统设置',
     myAccount: '我的账户',

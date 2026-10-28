@@ -777,6 +777,7 @@ const adminNavItems = computed((): NavItem[] => {
   const baseItems: NavItem[] = [
     { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
+    { path: '/admin/ops/user-concurrency', label: t('nav.userConcurrency'), icon: UsersIcon, featureFlag: flagOpsMonitoring },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/distillation-risk', label: t('nav.distillationRisk'), icon: ShieldIcon },
     { path: '/admin/model-bans', label: t('nav.modelBans'), icon: ShieldIcon },

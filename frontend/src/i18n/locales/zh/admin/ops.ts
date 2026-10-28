@@ -787,6 +787,22 @@ export default {
         errorAccounts: '异常 {count}',
         loadFailed: '加载并发数据失败'
       },
+      userConcurrency: {
+        title: '用户并发',
+        description: '全部活跃用户的实时并发用量看板',
+        empty: '当前没有用户并发活动',
+        loadFailed: '加载用户并发数据失败',
+        collectedAt: '采集时间：',
+        enabled: '实时监控已开启',
+        disabled: '已在设置中关闭实时监控',
+        user: '用户',
+        username: '用户名',
+        email: '邮箱',
+        currentInUse: '使用中',
+        maxCapacity: '容量',
+        waitingInQueue: '排队中',
+        loadPercentage: '负载'
+      },
       realtime: {
         title: '实时信息',
         connected: '实时已连接',

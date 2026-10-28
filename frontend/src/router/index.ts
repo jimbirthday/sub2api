@@ -457,6 +457,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/ops/user-concurrency',
+    name: 'AdminOpsUserConcurrency',
+    component: () => import('@/views/admin/ops/UserConcurrencyView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'User Concurrency',
+      titleKey: 'admin.ops.userConcurrency.title',
+      descriptionKey: 'admin.ops.userConcurrency.description'
+    }
+  },
+  {
     path: '/admin/audit-logs',
     name: 'AdminAuditLogs',
     component: () => import('@/views/admin/AuditLogView.vue'),
